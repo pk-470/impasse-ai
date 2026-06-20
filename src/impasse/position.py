@@ -153,6 +153,9 @@ CHECKERS_COUNT_WEIGHT: int = 120
 DOUBLES_PATHS_WEIGHT: int = 8
 SINGLES_PATHS_WEIGHT: int = 2
 DOUBLES_WEIGHT: int = 1
+# Score of a decided position. Kept far above any reachable heuristic score so that a
+# real win/loss always outranks a heuristic line and can be detected as terminal.
+WIN_VALUE: int = 100_000
 
 
 # Zobrist hashing: a random 64-bit id for each (square index, code) combination,
@@ -822,17 +825,17 @@ class Position:
         """
         Score the position from White's perspective.
 
-        A decided position scores +1000 if White has won and -1000 if Black has.
-        Otherwise the score combines: each player's checker count (falling back to
-        their double count when the counts are equal), the number and length of each
-        player's paths towards bearing off, and towards crowning.
+        A decided position scores +WIN_VALUE if White has won and -WIN_VALUE if Black
+        has (a magnitude kept well above any heuristic score, so a real win always
+        outranks a heuristic line). Otherwise the score combines: each player's checker
+        count (falling back to their double count when the counts are equal), the number
+        and length of each player's paths towards bearing off, and towards crowning.
 
         Returns:
             The integer evaluation; positive favours White, negative favours Black.
         """
         if self.winner is not None:
-            win_eval = 1000
-            return win_eval if self.winner == WHITE else -win_eval
+            return WIN_VALUE if self.winner == WHITE else -WIN_VALUE
         # Single pass over the board, bucketing piece indices by colour and type,
         # instead of four full-board scans (one per future_* call).
         white_singles: list[int] = []

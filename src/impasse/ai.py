@@ -10,6 +10,7 @@ from impasse.position import (
     OPPOSITE_COLOR,
     SINGLE_CODE,
     WHITE,
+    WIN_VALUE,
     Cell,
     Color,
     MoveTag,
@@ -23,6 +24,14 @@ TTEntry = tuple[float, Optional[Move], Optional[str], Optional[int]]
 MIN_SEARCH_DEPTH = 5
 MILLISECONDS_PER_MOVE = 6000
 MAX_MILLISECONDS_PER_MOVE = 10000
+
+# Hard ceiling on iterative-deepening depth: a backstop so a cheaply-resolved position
+# cannot spin the depth counter through the whole move budget.
+MAX_SEARCH_DEPTH = 64
+# A search value of at least this magnitude marks a proven forced win/loss (it is well
+# above any reachable heuristic score). Deeper search cannot change such a result, so
+# iterative deepening stops as soon as one is found.
+MATE_THRESHOLD = WIN_VALUE // 2
 
 # Bound the transposition table and eval cache so they cannot grow without limit
 # across a long game; once full, the oldest entries are evicted first (FIFO).
@@ -45,14 +54,17 @@ class AI:
     with move-ordering, iterative deepening and a transposition table.
     """
 
-    def __init__(self, color: Color) -> None:
+    def __init__(self, color: Color, dev: bool = False) -> None:
         """
         Create an AI player.
 
         Args:
             color: The colour this AI plays.
+            dev: When True, per-move search diagnostics (transposition-table visits,
+                eval-cache hits, node counts and speed) are collected and printed.
         """
         self.color: Color = color
+        self.dev: bool = dev
         # The TT is keyed on (state_hash, turn): the board hash alone collides for
         # the same position with opposite sides to move, whose minimax values differ.
         self.transposition_table: dict[tuple[int, Color], TTEntry] = {}
@@ -64,6 +76,18 @@ class AI:
         # Leaf-evaluation cache. evaluate() is a pure, turn-independent function of the
         # board, so it can be memoized by state_hash across the whole game/search.
         self.eval_cache: dict[int, int] = {}
+        # Per-move diagnostic counters, populated only when dev is on (see reset_stats).
+        self.reset_stats()
+
+    def reset_stats(self) -> None:
+        """Zero the per-move search diagnostic counters."""
+        self.nodes = 0
+        self.tt_lookups = 0
+        self.tt_hits = 0
+        self.tt_cutoffs = 0
+        self.tt_stores = 0
+        self.eval_lookups = 0
+        self.eval_hits = 0
 
     # Transposition table retrieval and storage
 
@@ -78,10 +102,14 @@ class AI:
             The stored (value, move, flag, depth) entry, or a (0.0, None, None,
             None) sentinel whose None depth marks a miss.
         """
-        try:
-            return self.transposition_table[(position.state_hash, position.turn)]
-        except KeyError:
+        entry = self.transposition_table.get((position.state_hash, position.turn))
+        if self.dev:
+            self.tt_lookups += 1
+            if entry is not None:
+                self.tt_hits += 1
+        if entry is None:
             return 0.0, None, None, None
+        return entry
 
     def tt_store(
         self,
@@ -105,6 +133,8 @@ class AI:
             flag: The bound type, one of "E" (exact), "L" (lower), "U" (upper).
             depth: The search depth the result was computed at.
         """
+        if self.dev:
+            self.tt_stores += 1
         key = (position.state_hash, position.turn)
         table = self.transposition_table
         existing = table.get(key)
@@ -293,18 +323,24 @@ class AI:
         ):
             raise ABTimeOut
 
+        if self.dev:
+            self.nodes += 1
         old_alpha, old_beta = alpha, beta
         # Search for the position in the transposition table. If the search depth in
         # the TT is larger than the current search depth, then trust the TT entry.
         tt_value, tt_move, tt_flag, tt_depth = self.tt_retrieve(position)
         if tt_depth is not None and tt_depth >= depth:
             if tt_flag == "E":
+                if self.dev:
+                    self.tt_cutoffs += 1
                 return tt_value, tt_move
             elif tt_flag == "L":
                 alpha = max(alpha, tt_value)
             elif tt_flag == "U":
                 beta = min(beta, tt_value)
             if alpha >= beta:
+                if self.dev:
+                    self.tt_cutoffs += 1
                 return tt_value, tt_move
 
         # Regular Alpha-Beta
@@ -312,6 +348,10 @@ class AI:
             state_hash = position.state_hash
             cache = self.eval_cache
             cached = cache.get(state_hash)
+            if self.dev:
+                self.eval_lookups += 1
+                if cached is not None:
+                    self.eval_hits += 1
             if cached is None:
                 cached = position.evaluate()
                 if len(cache) >= EVAL_CACHE_MAX_ENTRIES:
@@ -357,7 +397,8 @@ class AI:
 
         Searches depth 1, 2, ...; once MIN_SEARCH_DEPTH is passed it keeps going
         until MILLISECONDS_PER_MOVE is spent, and stops unconditionally at
-        MAX_MILLISECONDS_PER_MOVE.
+        MAX_MILLISECONDS_PER_MOVE. It also stops early once a forced win or loss is
+        proven (its value cannot improve with depth) or MAX_SEARCH_DEPTH is reached.
 
         Args:
             position: The position to search.
@@ -369,6 +410,8 @@ class AI:
         search_depth = 1
         self.min_search_depth_reached = False
         self.completed_any_depth = False
+        if self.dev:
+            self.reset_stats()
         self.search_start_time = milliseconds(time.time())
         # Seed with a safe fallback so a timeout before any depth completes still
         # returns a value (the depth-1 search is guaranteed to complete, however).
@@ -391,9 +434,40 @@ class AI:
                 value,
                 best_move,
             )
+            # A proven forced win/loss cannot change with deeper search, and there is
+            # no point searching past the depth ceiling, so stop rather than spend the
+            # rest of the move budget re-deriving the same result.
+            if abs(value) >= MATE_THRESHOLD or search_depth >= MAX_SEARCH_DEPTH:
+                break
             search_depth += 1
 
         return prev_search_depth, prev_value, prev_best_move
+
+    def print_dev_stats(self, depth: int) -> None:
+        """
+        Print the diagnostics gathered for the move just searched.
+
+        Args:
+            depth: The depth of the deepest completed search for the move.
+        """
+        elapsed_ms = milliseconds(time.time()) - self.search_start_time
+        seconds = elapsed_ms / 1000
+        nps = self.nodes / seconds if seconds else 0
+        tt_hit_pct = 100 * self.tt_hits / self.tt_lookups if self.tt_lookups else 0
+        eval_hit_pct = 100 * self.eval_hits / self.eval_lookups if self.eval_lookups else 0
+        print(
+            f"[dev] depth {depth} | {elapsed_ms} ms | "
+            f"{self.nodes} nodes ({nps:,.0f}/s)"
+        )
+        print(
+            f"[dev] TT: {self.tt_lookups} visits, {self.tt_hits} hits "
+            f"({tt_hit_pct:.1f}%), {self.tt_cutoffs} cutoffs, {self.tt_stores} stores, "
+            f"size {len(self.transposition_table)}"
+        )
+        print(
+            f"[dev] eval cache: {self.eval_lookups} lookups, {self.eval_hits} hits "
+            f"({eval_hit_pct:.1f}%), size {len(self.eval_cache)}"
+        )
 
     def suggested_move(
         self, position: Position
@@ -417,6 +491,8 @@ class AI:
                 tag = targets[target]
                 value = position.evaluate()
                 print(f"Alpha-Beta evaluation: {value} at depth 0 (one legal move)")
+                if self.dev:
+                    print("[dev] 1 legal move — returned without searching")
                 return origin, target, tag, True
 
         depth, value, best_move = self.iterative_deepening(position)
@@ -424,5 +500,7 @@ class AI:
             return None, None, None, False
         origin, target, tag = best_move
         print(f"Alpha-Beta evaluation: {value} at depth {depth}")
+        if self.dev:
+            self.print_dev_stats(depth)
 
         return origin, target, tag, False

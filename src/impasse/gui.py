@@ -92,9 +92,20 @@ class GUI(Position):
         window: pg.Surface,
         secs: Optional[int] = None,
         ai_player: Optional[Color] = None,
+        dev: bool = False,
     ) -> None:
+        """
+        Set up the window, fonts, and a fresh game.
+
+        Args:
+            window: The pygame surface to draw on.
+            secs: Per-player time budget in seconds for a timed game, or None.
+            ai_player: The colour the AI plays, or None for human-vs-human.
+            dev: When True, the AI prints per-move search diagnostics.
+        """
         pg.init()
         self.window = window
+        self.dev = dev
         self.timed = True if secs and not ai_player else False
         self.fonts = {
             "info": pg.font.SysFont("georgia", 24),
@@ -112,7 +123,9 @@ class GUI(Position):
         self.selection_activated = True
         self.selected = None
         self.show_cells = True
-        self.ai_player: Optional[AI] = AI(ai_player) if ai_player else None
+        self.ai_player: Optional[AI] = (
+            AI(ai_player, dev=self.dev) if ai_player else None
+        )
         self.print_intro_message()
         if ai_player == WHITE:
             self.ai_play_turn_full()

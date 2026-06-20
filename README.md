@@ -27,9 +27,12 @@ uv run impasse                 # human vs human, untimed
 uv run impasse --ai black      # you play White against the AI
 uv run impasse --ai white      # you play Black against the AI (AI moves first)
 uv run impasse --time 600      # timed human-vs-human game, 10 minutes each side
+uv run impasse --ai black --dev  # print per-move AI search diagnostics to the console
 ```
 
 `--ai` and `--time` cannot be combined — timed games are human-vs-human only.
+`--dev` prints per-move search stats (transposition-table visits/hits/cutoffs, eval-cache
+hits, and nodes searched per second) and is most useful together with `--ai`.
 Run `uv run impasse --help` for the full list of options. With the environment
 active you can equivalently launch the game with `python -m impasse`.
 

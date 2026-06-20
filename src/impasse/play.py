@@ -11,13 +11,13 @@ def get_cell_from_mouse(pos):
     return (pos[0] // SQUARE_SIZE, (HEIGHT - pos[1]) // SQUARE_SIZE)
 
 
-def play(secs=None, ai_player=None):
+def play(secs=None, ai_player=None, dev=False):
     """Open the window and run the game's main event loop until quit."""
     WINDOW = pg.display.set_mode((WIDTH + INFO_WIDTH, HEIGHT))
     pg.display.set_caption("IMPASSE")
     run = True
     clock = pg.time.Clock()
-    game = GUI(WINDOW, secs, ai_player)
+    game = GUI(WINDOW, secs, ai_player, dev=dev)
     pg.time.set_timer(SEC, 1000)
 
     while run:

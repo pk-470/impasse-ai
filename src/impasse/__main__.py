@@ -46,13 +46,21 @@ def build_parser():
             "cannot be combined with --ai"
         ),
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help=(
+            "print per-move AI search diagnostics: transposition-table visits, hits "
+            "and cutoffs, eval-cache hits, and nodes searched per second (needs --ai)"
+        ),
+    )
     return parser
 
 
 def main(argv: list[str] | None = None):
     args = build_parser().parse_args(argv)
     ai_player = _AI_COLORS.get(args.ai)
-    play(secs=args.time, ai_player=ai_player)
+    play(secs=args.time, ai_player=ai_player, dev=args.dev)
 
 
 if __name__ == "__main__":

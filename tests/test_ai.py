@@ -153,3 +153,100 @@ def test_tt_key_distinguishes_side_to_move(no_time_limit):
     fresh = fresh_ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -inf, inf)
 
     assert primed == fresh, "TT primed for the other side must not change the result"
+
+
+# --------------------------------------------------------------------------- #
+# Dev-mode diagnostics
+# --------------------------------------------------------------------------- #
+
+
+def test_dev_stats_collected_and_consistent(no_time_limit):
+    """With dev on, a search fills the diagnostic counters with consistent values."""
+    pos = Position()
+    ai = _armed()
+    ai.dev = True
+    ai.completed_any_depth = True
+    ai.reset_stats()
+    ai.alpha_beta(pos, 4, -inf, inf)
+    assert ai.nodes > 0
+    assert ai.tt_stores > 0
+    # Hits are a subset of lookups; cutoffs are a subset of hits.
+    assert ai.tt_lookups >= ai.tt_hits >= ai.tt_cutoffs >= 0
+    assert ai.eval_lookups >= ai.eval_hits >= 0
+
+
+def test_dev_counters_stay_zero_when_off(no_time_limit):
+    """With dev off, the counters are never touched (zero search overhead)."""
+    ai = _armed()
+    ai.completed_any_depth = True
+    ai.alpha_beta(Position(), 4, -inf, inf)
+    assert (ai.nodes, ai.tt_lookups, ai.tt_hits, ai.tt_stores, ai.eval_lookups) == (
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def test_dev_instrumentation_does_not_change_search(no_time_limit):
+    """Collecting diagnostics must not change the search value or move."""
+    pos = Position()
+    plain = _armed()
+    plain.completed_any_depth = True
+    instrumented = _armed()
+    instrumented.dev = True
+    instrumented.completed_any_depth = True
+    assert instrumented.alpha_beta(pos, 4, -inf, inf) == plain.alpha_beta(pos, 4, -inf, inf)
+
+
+# --------------------------------------------------------------------------- #
+# Iterative-deepening termination (forced-result early exit + depth cap)
+# --------------------------------------------------------------------------- #
+
+
+def _forced_result_position() -> Position:
+    """A sparse position whose game tree resolves to a forced win/loss for White."""
+    state = {cell: None for cell in INITIAL_STATE}
+    state[(0, 0)] = (WHITE, 1)
+    state[(2, 0)] = (WHITE, 2)
+    state[(7, 7)] = (BLACK, 1)
+    state[(5, 7)] = (BLACK, 2)
+    return Position(state=state, turn=WHITE)
+
+
+def test_iterative_deepening_stops_on_forced_result(no_time_limit):
+    """A proven forced win/loss stops iterative deepening via the mate exit, well
+    below the depth cap, instead of spinning the depth counter."""
+    depth, value, move = AI(WHITE).iterative_deepening(_forced_result_position())
+    assert abs(value) >= ai_mod.MATE_THRESHOLD, "a forced result is a mate-magnitude value"
+    assert depth < ai_mod.MAX_SEARCH_DEPTH, "stopped on the proven result, not the cap"
+    assert move is not None
+
+
+def test_iterative_deepening_respects_depth_cap(no_time_limit, monkeypatch):
+    """When no forced result is yet in reach, the depth cap bounds the search rather
+    than letting a cheaply-resolved position run away."""
+    monkeypatch.setattr(ai_mod, "MAX_SEARCH_DEPTH", 8)
+    depth, value, move = AI(WHITE).iterative_deepening(_forced_result_position())
+    assert depth == 8, "the cap (mate is deeper than 8 here) is what stops the search"
+    assert move is not None
+
+
+def test_a_real_win_outranks_a_heuristic_line():
+    """A terminal win must score above any heuristic position, so a winning move is
+    never ranked below a merely material-heavy one."""
+    win = {cell: None for cell in INITIAL_STATE}
+    win[(7, 7)] = (WHITE, 1)  # White's only checker -> forced bear-off -> White wins
+    win[(0, 6)] = (BLACK, 1)
+    won = Position(state=win, turn=WHITE).new_position_after_move((7, 7), None, "B")
+    assert won.winner == WHITE
+
+    ahead = {cell: None for cell in INITIAL_STATE}
+    ahead[(0, 0)] = (WHITE, 1)
+    ahead[(2, 0)] = (WHITE, 1)  # White far ahead on material but not finished
+    for cell in [(1, 1), (3, 1), (5, 1), (7, 1), (1, 7), (3, 7), (5, 7), (7, 7)]:
+        ahead[cell] = (BLACK, 1)
+    heuristic = Position(state=ahead, turn=WHITE)
+    assert heuristic.winner is None
+    assert won.evaluate() > heuristic.evaluate(), "an actual win must outscore a heuristic lead"
