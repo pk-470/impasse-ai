@@ -1,19 +1,63 @@
 # Impasse Search Engine
 
-This is a search engine for the game [Impasse](https://www.marksteeregames.com/Impasse_rules.pdf) by Mark Steere. It uses Alpha-Beta search along with move ordering, iterative deepening and a transposition table. To play the game, open the play.py file in the Code folder and search for this part at the bottom:
+This is a search engine for the game [Impasse](https://www.marksteeregames.com/Impasse_rules.pdf)
+by Mark Steere. It uses alpha-beta search with move ordering, iterative deepening
+and a transposition table, wrapped in a pygame GUI.
 
-![main](main.png)
+## Requirements
 
-To play an untimed game with human opponents, leave this part as is. To play a timed game against a human opponent (e.g. 10 minutes for each opponent) modify the code by adding the parameter
+- Python 3.13+
+- [uv](https://docs.astral.sh/uv/) for dependency management
 
-> secs=600
+## Installation
 
-the call of the play function. To play with an AI opponent as WHITE add the parameter
+Clone the repository and let uv create the virtual environment and install the
+package (and its dependencies, pygame and platformdirs):
 
-> ai_player=BLACK
+```bash
+uv sync
+```
 
-in the call of the play function. Similarly, to play with an AI opponent as BLACK add the parameter
+## Playing
 
-> ai_player=WHITE
+Launch a game with `uv run impasse`:
 
-Note that you can't play a timed game against the AI. You can undo a move by clicking the z button during gameplay (currently only works for one move). You can start a new game with the same parameters by clicking the n button during gameplay. You can show or hide the cell names by clicking the c button during gameplay.
+```bash
+uv run impasse                 # human vs human, untimed
+uv run impasse --ai black      # you play White against the AI
+uv run impasse --ai white      # you play Black against the AI (AI moves first)
+uv run impasse --time 600      # timed human-vs-human game, 10 minutes each side
+```
+
+`--ai` and `--time` cannot be combined — timed games are human-vs-human only.
+Run `uv run impasse --help` for the full list of options. With the environment
+active you can equivalently launch the game with `python -m impasse`.
+
+### In-game controls
+
+| Key | Action                                  |
+| --- | --------------------------------------- |
+| `c` | Show or hide the cell names             |
+| `z` | Undo the last move (one move only)      |
+| `n` | Start a new game with the same settings |
+
+The current game state is saved between moves to a recovery file in your user
+data directory (e.g. `~/.local/share/impasse/` on Linux), so it lives outside the
+package and does not require write access to the install location.
+
+## Project layout
+
+```
+src/impasse/
+├── __main__.py     # argparse CLI entry point (`impasse` / `python -m impasse`)
+├── play.py         # pygame event loop
+├── position/       # board state, move generation, evaluation, Zobrist hashing
+│   ├── __init__.py
+│   └── _constants.py
+├── gui/            # pygame GUI wrapper
+│   ├── __init__.py
+│   └── _constants.py
+└── ai/             # alpha-beta search engine
+    ├── __init__.py
+    └── _constants.py
+```

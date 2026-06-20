@@ -1,2 +1,20 @@
+# Course media (large binaries)
 Video & Presentation
 ~$Impasse Presentation.pptx
+Code.zip
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# uv / virtual environments
+.venv/
+
+# OS cruft
+.DS_Store
