@@ -323,7 +323,7 @@ class Position:
 
     def __init__(
         self,
-        state: Optional[State] = None,
+        state: Optional[State | LegacyState] = None,
         turn: Optional[Color] = None,
         checkers_total: Optional[dict[Color, int]] = None,
         all_legal_moves: Optional[LegalMoves] = None,
@@ -336,7 +336,7 @@ class Position:
 
     def make_position(
         self,
-        state: Optional[State] = None,
+        state: Optional[State | LegacyState] = None,
         turn: Optional[Color] = None,
         checkers_total: Optional[dict[Color, int]] = None,
         all_legal_moves: Optional[LegalMoves] = None,

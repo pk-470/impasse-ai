@@ -1,6 +1,6 @@
 import time
 from math import inf
-from typing import Callable, Optional
+from typing import Callable, Optional, cast
 
 from impasse.position import (
     COLOR_CODES,
@@ -22,8 +22,8 @@ Move = tuple[Cell, Optional[Cell], MoveTag]
 TTEntry = tuple[float, Optional[Move], Optional[str], Optional[int]]
 
 MIN_SEARCH_DEPTH = 5
-MILLISECONDS_PER_MOVE = 6000
-MAX_MILLISECONDS_PER_MOVE = 10000
+MILLISECONDS_PER_MOVE: float = 6000
+MAX_MILLISECONDS_PER_MOVE: float = 10000
 
 # Hard ceiling on iterative-deepening depth: a backstop so a cheaply-resolved position
 # cannot spin the depth counter through the whole move budget.
@@ -157,7 +157,8 @@ class AI:
         if existing is not None:
             # Prefer the entry searched to the greater depth; on a tie the newer
             # result replaces the old one.
-            if existing[3] > depth:
+            existing_depth = existing[3]
+            if existing_depth is not None and existing_depth > depth:
                 return
         elif len(table) >= TT_MAX_ENTRIES:
             del table[next(iter(table))]
@@ -265,7 +266,16 @@ class AI:
                         else:
                             other_slides.append(move)
 
-        other_slides.sort(reverse=True, key=lambda x: abs(x[0][0] - x[1][0]))
+        history = self.history
+        if history:
+            other_slides.sort(
+                reverse=True,
+                key=lambda m: (history.get(m, 0), abs(m[0][0] - cast(Cell, m[1])[0])),
+            )
+        else:
+            other_slides.sort(
+                reverse=True, key=lambda x: abs(x[0][0] - cast(Cell, x[1])[0])
+            )
         return (
             check_first
             + killer_moves
@@ -427,7 +437,9 @@ class AI:
         self._tick_countdown = TICK_INTERVAL_NODES
         # Seed with a safe fallback so a timeout before any depth completes still
         # returns a value (the depth-1 search is guaranteed to complete, however).
-        prev_search_depth, prev_value, prev_best_move = 0, position.evaluate(), None
+        prev_search_depth: int = 0
+        prev_value: float = float(position.evaluate())
+        prev_best_move: Optional[Move] = None
         while True:
             self.current_depth = search_depth
             if search_depth > MIN_SEARCH_DEPTH:
@@ -503,8 +515,10 @@ class AI:
             if len(targets) == 1:
                 target = next(iter(targets))
                 tag = targets[target]
-                value = position.evaluate()
-                print(f"Alpha-Beta evaluation: {value} at depth 0 (one legal move)")
+                single_value = position.evaluate()
+                print(
+                    f"Alpha-Beta evaluation: {single_value} at depth 0 (one legal move)"
+                )
                 if self.dev:
                     print("[dev] 1 legal move — returned without searching")
                 return origin, target, tag, True

@@ -9,7 +9,7 @@ import pytest
 
 import impasse.ai as ai_mod
 from impasse.ai import AI
-from impasse.position import BLACK, INITIAL_STATE, WHITE, Position
+from impasse.position import BLACK, INITIAL_STATE, WHITE, LegacyState, Position
 
 
 def _armed(color=WHITE) -> AI:
@@ -85,7 +85,7 @@ def test_warm_caches_are_populated_and_consistent(no_time_limit):
 def test_suggested_move_single_legal_move_no_crash():
     """Bug #2: a position with exactly one legal move returns it (unique_move=True)
     via the fast path instead of raising UnboundLocalError."""
-    state = {cell: None for cell in INITIAL_STATE}
+    state: LegacyState = {cell: None for cell in INITIAL_STATE}
     state[(7, 7)] = (WHITE, 1)  # impasse -> single forced bear-off
     state[(0, 6)] = (BLACK, 1)
     pos = Position(state=state, turn=WHITE)
@@ -207,7 +207,7 @@ def test_dev_instrumentation_does_not_change_search(no_time_limit):
 
 def _forced_result_position() -> Position:
     """A sparse position whose game tree resolves to a forced win/loss for White."""
-    state = {cell: None for cell in INITIAL_STATE}
+    state: LegacyState = {cell: None for cell in INITIAL_STATE}
     state[(0, 0)] = (WHITE, 1)
     state[(2, 0)] = (WHITE, 2)
     state[(7, 7)] = (BLACK, 1)
@@ -236,13 +236,13 @@ def test_iterative_deepening_respects_depth_cap(no_time_limit, monkeypatch):
 def test_a_real_win_outranks_a_heuristic_line():
     """A terminal win must score above any heuristic position, so a winning move is
     never ranked below a merely material-heavy one."""
-    win = {cell: None for cell in INITIAL_STATE}
+    win: LegacyState = {cell: None for cell in INITIAL_STATE}
     win[(7, 7)] = (WHITE, 1)  # White's only checker -> forced bear-off -> White wins
     win[(0, 6)] = (BLACK, 1)
     won = Position(state=win, turn=WHITE).new_position_after_move((7, 7), None, "B")
     assert won.winner == WHITE
 
-    ahead = {cell: None for cell in INITIAL_STATE}
+    ahead: LegacyState = {cell: None for cell in INITIAL_STATE}
     ahead[(0, 0)] = (WHITE, 1)
     ahead[(2, 0)] = (WHITE, 1)  # White far ahead on material but not finished
     for cell in [(1, 1), (3, 1), (5, 1), (7, 1), (1, 7), (3, 7), (5, 7), (7, 7)]:

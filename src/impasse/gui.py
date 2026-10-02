@@ -23,7 +23,7 @@ from impasse.position import (
 class LastMoveData(TypedDict):
     """The cells touched by the last move, the side that made it, and its tag."""
 
-    cells: list[Optional[Cell]]
+    cells: list[Cell]
     color: Optional[Color]
     tag: Optional[MoveTag]
 
@@ -109,7 +109,7 @@ class GUI(Position):
         pg.init()
         self.window = window
         self.dev = dev
-        self.timed = True if secs and not ai_player else False
+        self.timed = bool(secs and not ai_player)
         self.fonts = {
             "info": pg.font.SysFont("georgia", 24),
             "cell": pg.font.SysFont("georgia", 14),

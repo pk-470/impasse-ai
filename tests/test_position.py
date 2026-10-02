@@ -13,6 +13,7 @@ import pytest
 
 from impasse.position import (
     BLACK,
+    LegacyState,
     INITIAL_STATE,
     WHITE,
     WIN_VALUE,
@@ -32,7 +33,7 @@ def perft(pos: Position, depth: int) -> int:
     return total
 
 
-def _empty_board() -> dict:
+def _empty_board() -> LegacyState:
     return {cell: None for cell in INITIAL_STATE}
 
 
