@@ -26,6 +26,7 @@ class LastMoveData(TypedDict):
     color: Optional[Color]
     tag: Optional[MoveTag]
 
+
 WIDTH, HEIGHT = 640, 640
 SQUARE_SIZE = WIDTH // 8
 RADIUS = 2 * SQUARE_SIZE // 5
@@ -169,7 +170,7 @@ class GUI(Position):
         self.last_move_data = position_data["last_move_data"]
         self.undo_activated = position_data["undo_activated"]
         self.times = position_data["times"]
-        self.selection_activated = False if self.winner else True
+        self.selection_activated = not self.winner
         self.selected = None
 
     def update_time(self) -> None:

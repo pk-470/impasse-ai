@@ -454,10 +454,11 @@ class AI:
         seconds = elapsed_ms / 1000
         nps = self.nodes / seconds if seconds else 0
         tt_hit_pct = 100 * self.tt_hits / self.tt_lookups if self.tt_lookups else 0
-        eval_hit_pct = 100 * self.eval_hits / self.eval_lookups if self.eval_lookups else 0
+        eval_hit_pct = (
+            100 * self.eval_hits / self.eval_lookups if self.eval_lookups else 0
+        )
         print(
-            f"[dev] depth {depth} | {elapsed_ms} ms | "
-            f"{self.nodes} nodes ({nps:,.0f}/s)"
+            f"[dev] depth {depth} | {elapsed_ms} ms | {self.nodes} nodes ({nps:,.0f}/s)"
         )
         print(
             f"[dev] TT: {self.tt_lookups} visits, {self.tt_hits} hits "

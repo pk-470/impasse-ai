@@ -321,12 +321,16 @@ class Position:
     def is_occupied_of_color(self, cell: Cell, color: Color) -> bool:
         """Return whether `cell` holds a checker of the given colour."""
         i, j = cell
-        return 0 <= i < 8 and 0 <= j < 8 and self.state[_index(cell)] in COLOR_CODES[color]
+        return (
+            0 <= i < 8 and 0 <= j < 8 and self.state[_index(cell)] in COLOR_CODES[color]
+        )
 
     def is_occupied_single_of_color(self, cell: Cell, color: Color) -> bool:
         """Return whether `cell` holds a single checker of the given colour."""
         i, j = cell
-        return 0 <= i < 8 and 0 <= j < 8 and self.state[_index(cell)] == SINGLE_CODE[color]
+        return (
+            0 <= i < 8 and 0 <= j < 8 and self.state[_index(cell)] == SINGLE_CODE[color]
+        )
 
     def piece_at(self, cell: Cell) -> Optional[Piece]:
         """
@@ -479,9 +483,7 @@ class Position:
         # Impasse
         if not other_moves:
             return {
-                cell: {None: "B"}
-                for cell in DARK_CELLS
-                if state[_index(cell)] in own
+                cell: {None: "B"} for cell in DARK_CELLS if state[_index(cell)] in own
             }
         return other_moves
 
