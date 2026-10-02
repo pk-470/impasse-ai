@@ -169,6 +169,7 @@ class AI:
         self,
         position: Position,
         most_promising_move: Optional[Move] = None,
+        depth: int = 0,
     ) -> list[Move]:
         """
         Order a position's legal moves to improve alpha-beta pruning.
@@ -176,14 +177,18 @@ class AI:
         Args:
             position: The position whose moves to order.
             most_promising_move: A move to try first ahead of all others, if any.
+            depth: The remaining search depth, selecting the killer-move slot.
 
         Returns:
             The legal moves as (origin, target, tag) tuples, most promising first:
-            the most_promising_move, then forced crownings, bear offs, slides that
-            block enemy doubles then singles (two blocks before one), potential
-            crownings, transposes, and finally the remaining slides longest first.
+            the most_promising_move, then killer moves, forced crownings, bear offs,
+            slides that block enemy doubles then singles (two blocks before one),
+            potential crownings, transposes, and finally the remaining slides, most
+            cutoffs first (longest first until the history table has entries).
         """
         check_first = []
+        killer_moves = []
+        killer_1, killer_2 = self.killers[depth]
         bear_offs = []
         crownings = []
         potential_crownings = []
@@ -205,6 +210,8 @@ class AI:
                 move = (origin, target, tag)
                 if move == most_promising_move:
                     check_first = [move]
+                elif move == killer_1 or move == killer_2:
+                    killer_moves.append(move)
                 elif tag == "C":
                     crownings.append(move)
                 elif tag in ("B", "SB", "TB"):
@@ -261,6 +268,7 @@ class AI:
         other_slides.sort(reverse=True, key=lambda x: abs(x[0][0] - x[1][0]))
         return (
             check_first
+            + killer_moves
             + crownings
             + bear_offs
             + slides_blocking_doubles_twice
@@ -271,39 +279,6 @@ class AI:
             + transposes
             + other_slides
         )
-
-    def minimax_parameters(
-        self, color: Color
-    ) -> tuple[
-        float,
-        Callable[[float, float], bool],
-        Callable[[float, float, float], tuple[float, float]],
-    ]:
-        """
-        Build the starting search parameters for the player to move.
-
-        Args:
-            color: The side to move.
-
-        Returns:
-            A (start_value, is_better, update_window) triple: the worst-case
-            initial value for the player, a predicate telling whether one value
-            beats the current best for this player, and a function that tightens
-            the (alpha, beta) window given a new value. White maximises, Black
-            minimises.
-        """
-        if color == WHITE:
-            return (
-                -inf,
-                lambda local_value, value: local_value > value,
-                lambda alpha, beta, value: (max(alpha, value), beta),
-            )
-        else:
-            return (
-                inf,
-                lambda local_value, value: local_value < value,
-                lambda alpha, beta, value: (alpha, min(beta, value)),
-            )
 
     def alpha_beta(
         self,
@@ -382,23 +357,36 @@ class AI:
                 cache[state_hash] = cached
             return cached, None
 
-        start_value, value_test, alpha_beta_assignment = self.minimax_parameters(
-            position.turn
-        )
-        value = start_value
+        # White maximises, Black minimises. Branching on the side to move once keeps
+        # two Python-level closure calls per move out of the hot loop.
+        maximising = position.turn == WHITE
+        value = -inf if maximising else inf
         best_move: Optional[Move] = None
         # Check TT move first
-        for origin, target, tag in self.ordered_moves(position, tt_move):
+        for origin, target, tag in self.ordered_moves(position, tt_move, depth):
             new_position = position.new_position_after_move(origin, target, tag)
             if new_position.turn == position.turn:
                 local_value, _ = self.alpha_beta(new_position, depth, alpha, beta)
             else:
                 local_value, _ = self.alpha_beta(new_position, depth - 1, alpha, beta)
-            if value_test(local_value, value):
+            if maximising:
+                if local_value > value:
+                    value = local_value
+                    best_move = (origin, target, tag)
+                    alpha = max(alpha, value)
+            elif local_value < value:
                 value = local_value
                 best_move = (origin, target, tag)
-            alpha, beta = alpha_beta_assignment(alpha, beta, value)
+                beta = min(beta, value)
             if alpha >= beta:
+                # Remember quiet moves that cut off, to try them earlier elsewhere.
+                if tag == "S" or tag == "T":
+                    move = (origin, target, tag)
+                    slot = self.killers[depth]
+                    if slot[0] != move:
+                        slot[1] = slot[0]
+                        slot[0] = move
+                    self.history[move] = self.history.get(move, 0) + depth * depth
                 break
 
         # Store the position in the TT

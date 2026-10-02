@@ -191,6 +191,130 @@ def _make_state_hash(state: list[int]) -> int:
     return state_hash
 
 
+def _bear_off_walk(
+    state: list[int],
+    single: int,
+    home: frozenset,
+    diags: list[list[list[int]]],
+    anchor: int,
+    i: int,
+    best: int,
+    steps: int,
+    prev_empty: bool,
+    changed_dir: bool,
+) -> int:
+    """
+    Walk one double's bear-off paths and return the best score found.
+
+    Module-level (not a method) and int-threaded (not dict-accumulating): this is
+    the engine's hottest recursion.
+
+    Args:
+        state: The flat board to walk.
+        single: The square code of the moving player's single.
+        home: The moving player's home-row indices.
+        diags: The player's per-anchor double-move diagonals.
+        anchor: The board index the current leg starts from.
+        i: Which of the double's two move directions to follow.
+        best: The best score found for this double so far (_NO_PATH if none).
+        steps: Steps taken so far on the current path.
+        prev_empty: Whether the previous square stepped through was empty.
+        changed_dir: Whether the leg began by changing direction.
+
+    Returns:
+        The better of `best` and the best score reachable from this leg, a score
+        being DOUBLES_PATHS_MAX minus the path's step count.
+    """
+    for idx in diags[anchor][i]:
+        piece = state[idx]
+        if piece == EMPTY:
+            # A step is added if we move from a single
+            # to an empty cell
+            if not prev_empty:
+                steps += 1
+                prev_empty = True
+            changed_dir = False
+            # Add one step before changing direction
+            new_steps = steps + 1
+        elif piece == single:
+            # A step is added if we encounter a single cell
+            # unless it is after changing direction at an empty
+            # cell (since then we have already added a step)
+            if not (changed_dir and prev_empty):
+                steps += 1
+            changed_dir = False
+            prev_empty = False
+            # Change direction without adding step
+            new_steps = steps
+        else:
+            break
+
+        # Keep the shortest path to bear off found so far for this double
+        # (converted into a score out of DOUBLES_PATHS_MAX)
+        if idx in home and DOUBLES_PATHS_MAX - steps > best:
+            best = DOUBLES_PATHS_MAX - steps
+            break
+
+        # Change direction. Steps only grow, so DOUBLES_PATHS_MAX - new_steps bounds
+        # this leg: one that cannot beat `best` is dead and cutting it changes nothing.
+        if DOUBLES_PATHS_MAX - new_steps > best:
+            best = _bear_off_walk(
+                state,
+                single,
+                home,
+                diags,
+                idx,
+                1 - i,
+                best,
+                new_steps,
+                prev_empty,
+                True,
+            )
+
+    return best
+
+
+def _crown_walk(
+    state: list[int],
+    home: frozenset,
+    diags: list[list[list[int]]],
+    anchor: int,
+    i: int,
+    best: int,
+    steps: int,
+) -> int:
+    """
+    Walk one single's paths to a crowning square and return the best score found.
+
+    Args:
+        state: The flat board to walk.
+        home: The opponent home-row indices (the crowning squares).
+        diags: The player's per-anchor single-move diagonals.
+        anchor: The board index the current leg starts from.
+        i: Which of the single's two move directions to follow.
+        best: The best score found for this single so far (_NO_PATH if none).
+        steps: Steps taken so far on the current path.
+
+    Returns:
+        The better of `best` and the best score reachable from this leg, a score
+        being SINGLES_PATHS_MAX minus the path's step count.
+    """
+    for idx in diags[anchor][i]:
+        if state[idx] != EMPTY:
+            break
+
+        # Keep the shortest path to a crowning square found so far for this single
+        # (converted into a score out of SINGLES_PATHS_MAX)
+        if idx in home and SINGLES_PATHS_MAX - steps > best:
+            best = SINGLES_PATHS_MAX - steps
+
+        # Change direction (add 1 to steps), unless the bound rules the leg out.
+        if SINGLES_PATHS_MAX - steps - 1 > best:
+            best = _crown_walk(state, home, diags, idx, 1 - i, best, steps + 1)
+
+    return best
+
+
 class Position:
     """
     A class to keep track of each position along with its available moves,
@@ -645,144 +769,6 @@ class Position:
         new_position.update(state_update, tag)
         return new_position
 
-    def path_to_bear_off(
-        self,
-        state: list[int],
-        single: int,
-        home: frozenset,
-        diags: list[list[list[int]]],
-        start: int,
-        anchor: int,
-        i: int,
-        doubles_with_paths: dict[int, int],
-        steps: int,
-        prev_empty: bool,
-        changed_dir: bool,
-    ) -> dict[int, int]:
-        """
-        Find the shortest bear-off path for one double checker.
-
-        Args:
-            state: The flat board to walk.
-            single: The square code of the moving player's single.
-            home: The moving player's home-row indices.
-            diags: The player's per-anchor double-move diagonals.
-            start: The board index of the double being scored.
-            anchor: The board index the current leg starts from.
-            i: Which of the double's two move directions to follow.
-            doubles_with_paths: Accumulated best score per double, by start index.
-            steps: Steps taken so far on the current path.
-            prev_empty: Whether the previous square stepped through was empty.
-            changed_dir: Whether the leg began by changing direction.
-
-        Returns:
-            doubles_with_paths updated with the best score (DOUBLES_PATHS_MAX minus
-            the shortest step count) found for start.
-        """
-        for idx in diags[anchor][i]:
-            piece = state[idx]
-            if piece == EMPTY:
-                # A step is added if we move from a single
-                # to an empty cell
-                if not prev_empty:
-                    steps += 1
-                    prev_empty = True
-                changed_dir = False
-                # Add one step before changing direction
-                new_steps = steps + 1
-            elif piece == single:
-                # A step is added if we encounter a single cell
-                # unless it is after changing direction at an empty
-                # cell (since then we have already added a step)
-                if not (changed_dir and prev_empty):
-                    steps += 1
-                changed_dir = False
-                prev_empty = False
-                # Change direction without adding step
-                new_steps = steps
-            else:
-                break
-
-            # Add the shortest path to bear off found so far for
-            # each double (converted into a score out of 10)
-            if idx in home and (
-                start not in doubles_with_paths
-                or DOUBLES_PATHS_MAX - steps > doubles_with_paths[start]
-            ):
-                doubles_with_paths[start] = DOUBLES_PATHS_MAX - steps
-                break
-
-            # Change direction
-            doubles_with_paths = self.path_to_bear_off(
-                state,
-                single,
-                home,
-                diags,
-                start,
-                idx,
-                1 - i,
-                doubles_with_paths,
-                new_steps,
-                prev_empty,
-                True,
-            )
-
-        return doubles_with_paths
-
-    def path_to_crown(
-        self,
-        state: list[int],
-        home: frozenset,
-        diags: list[list[list[int]]],
-        start: int,
-        anchor: int,
-        i: int,
-        singles_with_paths: dict[int, int],
-        steps: int,
-    ) -> dict[int, int]:
-        """
-        Find the shortest path to a crowning square for one single checker.
-
-        Args:
-            state: The flat board to walk.
-            home: The opponent home-row indices (the crowning squares).
-            diags: The player's per-anchor single-move diagonals.
-            start: The board index of the single being scored.
-            anchor: The board index the current leg starts from.
-            i: Which of the single's two move directions to follow.
-            singles_with_paths: Accumulated best score per single, by start index.
-            steps: Steps taken so far on the current path.
-
-        Returns:
-            singles_with_paths updated with the best score (SINGLES_PATHS_MAX minus
-            the shortest step count) found for start.
-        """
-        for idx in diags[anchor][i]:
-            if state[idx] != EMPTY:
-                break
-
-            # Record the shortest path to a crowning square found so far for
-            # each single (converted into a score out of SINGLES_PATHS_MAX)
-            if idx in home and (
-                start not in singles_with_paths
-                or SINGLES_PATHS_MAX - steps > singles_with_paths[start]
-            ):
-                singles_with_paths[start] = SINGLES_PATHS_MAX - steps
-
-            # Change direction (add 1 to steps)
-            singles_with_paths = self.path_to_crown(
-                state,
-                home,
-                diags,
-                start,
-                idx,
-                1 - i,
-                singles_with_paths,
-                steps + 1,
-            )
-
-        return singles_with_paths
-
     def future_bear_offs(self, color: Color, doubles: list[int]) -> int:
         """
         Score a player's prospects of bearing off their double checkers.
@@ -794,19 +780,19 @@ class Position:
         Returns:
             The combined shortest-path-to-bear-off score over those doubles.
         """
-        doubles_with_paths: dict[int, int] = {}
+        total = 0
         state = self.state
         single = SINGLE_CODE[color]
         home = HOME_INDICES[color]
         diags = BEAR_DIAGS[color]
+        walk = _bear_off_walk
         for start in doubles:
-            for i in (0, 1):
-                doubles_with_paths = self.path_to_bear_off(
-                    state, single, home, diags, start, start, i,
-                    doubles_with_paths, 0, False, False,
-                )
+            best = walk(state, single, home, diags, start, 0, _NO_PATH, 0, False, False)
+            best = walk(state, single, home, diags, start, 1, best, 0, False, False)
+            if best != _NO_PATH:
+                total += best
 
-        return sum(doubles_with_paths.values())
+        return total
 
     def future_crowns(self, color: Color, singles: list[int]) -> int:
         """
@@ -819,17 +805,18 @@ class Position:
         Returns:
             The combined shortest-path-to-crowning score over those singles.
         """
-        singles_with_paths: dict[int, int] = {}
+        total = 0
         state = self.state
         home = HOME_INDICES[OPPOSITE_COLOR[color]]
         diags = CROWN_DIAGS[color]
+        walk = _crown_walk
         for start in singles:
-            for i in (0, 1):
-                singles_with_paths = self.path_to_crown(
-                    state, home, diags, start, start, i, singles_with_paths, 1
-                )
+            best = walk(state, home, diags, start, 0, _NO_PATH, 1)
+            best = walk(state, home, diags, start, 1, best, 1)
+            if best != _NO_PATH:
+                total += best
 
-        return sum(singles_with_paths.values())
+        return total
 
     def evaluate(self) -> int:
         """
