@@ -145,6 +145,13 @@ CROWN_DIAGS: dict[Color, list[list[list[int]]]] = {
     for color in (WHITE, BLACK)
 }
 
+# Sentinel "no path found" score, below any score a real path can reach.
+_NO_PATH: int = -1_000
+
+# Sentinel for the `winner` argument: read the winner off the board rather than
+# taking the caller's word for it. Distinct from None, which means "nobody has won".
+DERIVE_WINNER: object = object()
+
 # Parameters and weights for evaluation
 DOUBLES_PATHS_MAX: int = 10
 SINGLES_PATHS_MAX: int = 10
@@ -196,7 +203,7 @@ class Position:
         turn: Optional[Color] = None,
         checkers_total: Optional[dict[Color, int]] = None,
         all_legal_moves: Optional[LegalMoves] = None,
-        winner: Optional[Color] = None,
+        winner: Optional[Color] | object = DERIVE_WINNER,
         state_hash: Optional[int] = None,
     ):
         self.make_position(
@@ -209,7 +216,7 @@ class Position:
         turn: Optional[Color] = None,
         checkers_total: Optional[dict[Color, int]] = None,
         all_legal_moves: Optional[LegalMoves] = None,
-        winner: Optional[Color] = None,
+        winner: Optional[Color] | object = DERIVE_WINNER,
         state_hash: Optional[int] = None,
     ) -> None:
         """
@@ -222,9 +229,9 @@ class Position:
                 None.
             all_legal_moves: The position's legal moves; omit (None) to have the
                 position work them out itself.
-            winner: The winning side, or None. With an explicit state, any value
-                that is not a colour or None makes the winner be read off the
-                board instead.
+            winner: The winning side, or None for "nobody has won yet". Left at
+                DERIVE_WINNER (the default) with an explicit state, the winner is
+                read off the board instead: a side with no checkers left has won.
             state_hash: The board's Zobrist hash; computed from the board if None.
         """
         self.state: State = (
@@ -244,8 +251,8 @@ class Position:
         self.winner: Optional[Color] = (
             None
             if state is None
-            else winner
-            if winner in (WHITE, BLACK, None)
+            else winner  # type: ignore[assignment]
+            if winner is not DERIVE_WINNER
             else WHITE
             if not self.checkers_total[WHITE]
             else BLACK
@@ -439,18 +446,18 @@ class Position:
             target is a single of the mover on the far home row that must be crowned.
             Empty if no crowning is available.
         """
-        crownings = {}
+        crownings: LegalMoves = {}
         single = SINGLE_CODE[self.turn]
         state = self.state
-        # Known limitation (kept for parity with the tournament engine): the map is
-        # keyed by helper-single origin, so when one helper could crown more than one
-        # single sitting on the far home row, only the last target survives. At least
-        # one legal crowning is always offered and no illegal move is ever produced.
+        # One helper can crown more than one far-row single, so each origin keeps all
+        # of its targets (the previous dict-comprehension kept only the last).
         for target in HOME_ROW[OPPOSITE_COLOR[self.turn]]:
             if state[_index(target)] == single:
-                crownings.update(
-                    {cell: {target: "C"} for cell in self.get_singles_except(target)}
-                )
+                for cell in self.get_singles_except(target):
+                    if cell in crownings:
+                        crownings[cell][target] = "C"
+                    else:
+                        crownings[cell] = {target: "C"}
 
         return crownings
 
@@ -602,10 +609,11 @@ class Position:
             self.checkers_total[self.turn] -= 1
             # Might make crowning possible
             self.check_for_crownings_and_change_turn()
-        # Transpose + Bear off
+        # Transpose + Bear off. Leaves a new single on the origin square, which is the
+        # rules' "come to have another on-board single" crowning trigger.
         elif tag == "TB":
             self.checkers_total[self.turn] -= 1
-            self.change_turn()
+            self.check_for_crownings_and_change_turn()
         # Potential crowning
         elif tag in ("SC", "TC"):
             self.check_for_crownings_and_change_turn()

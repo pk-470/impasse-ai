@@ -15,6 +15,7 @@ from impasse.position import (
     BLACK,
     INITIAL_STATE,
     WHITE,
+    WIN_VALUE,
     Position,
     _make_state_hash,
 )
@@ -152,3 +153,54 @@ def test_incoming_mandatory_crowning_is_offered():
     assert nxt.turn == WHITE
     tags = {tag for targets in nxt.all_legal_moves.values() for tag in targets.values()}
     assert "C" in tags, "the incoming mandatory crowning must be in the legal moves"
+
+
+def test_crownings_offer_every_legal_helper_target_pair():
+    """Every (helper, furthest-row single) pair is offered, not just the last one.
+
+    Keying the crownings map by helper origin alone used to drop A1 -> B8 here.
+    """
+    board = _empty_board()
+    board[(1, 7)] = (WHITE, 1)
+    board[(3, 7)] = (WHITE, 1)
+    board[(0, 0)] = (WHITE, 1)
+    board[(6, 0)] = (BLACK, 2)
+    pos = Position(state=board, turn=WHITE)
+    offered = {
+        (origin, target)
+        for origin, targets in pos.all_legal_moves.items()
+        for target, tag in targets.items()
+        if tag == "C"
+    }
+    assert offered == {
+        ((0, 0), (1, 7)),
+        ((0, 0), (3, 7)),
+        ((1, 7), (3, 7)),
+        ((3, 7), (1, 7)),
+    }
+
+
+def test_transpose_bear_off_checks_for_crownings():
+    """'TB' creates a new single, which can owe a crowning, so the turn must stay."""
+    board = _empty_board()
+    board[(1, 7)] = (WHITE, 1)   # uncrowned single on White's furthest row
+    board[(2, 0)] = (WHITE, 1)   # single in White's nearest row
+    board[(1, 1)] = (WHITE, 2)   # double that can transpose onto it
+    board[(6, 0)] = (BLACK, 2)
+    pos = Position(state=board, turn=WHITE)
+    update = pos.apply_move((1, 1), (2, 0), "TB")
+    pos.update(update, "TB")
+    assert pos.turn == WHITE, "a crowning is owed, so the turn must not change"
+    assert all(tag == "C" for t in pos.all_legal_moves.values() for tag in t.values())
+
+
+def test_winner_is_read_off_an_explicitly_given_board():
+    """A board with no White checkers is a White win, without being told so."""
+    board = _empty_board()
+    board[(0, 6)] = (BLACK, 1)
+    board[(7, 7)] = (BLACK, 2)
+    pos = Position(state=board, turn=BLACK)
+    assert pos.winner == WHITE
+    assert pos.evaluate() == WIN_VALUE
+    # None still means "nobody has won", so copies of a live game are unaffected.
+    assert Position(state=board, turn=BLACK, winner=None).winner is None
