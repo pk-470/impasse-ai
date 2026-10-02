@@ -7,8 +7,11 @@ SEC = pg.USEREVENT
 
 
 def get_cell_from_mouse(pos):
-    """Return the board cell under a mouse pixel position."""
-    return (pos[0] // SQUARE_SIZE, (HEIGHT - pos[1]) // SQUARE_SIZE)
+    """Return the board cell under a mouse pixel position, or None if off the board."""
+    cell = (pos[0] // SQUARE_SIZE, (HEIGHT - pos[1]) // SQUARE_SIZE)
+    if 0 <= cell[0] < 8 and 0 <= cell[1] < 8:
+        return cell
+    return None
 
 
 def play(secs=None, ai_player=None, dev=False):
@@ -33,7 +36,8 @@ def play(secs=None, ai_player=None, dev=False):
             if event.type == pg.MOUSEBUTTONDOWN:
                 pos = pg.mouse.get_pos()
                 cell = get_cell_from_mouse(pos)
-                game.select(cell)
+                if cell is not None:
+                    game.select(cell)
 
             if event.type == pg.KEYDOWN:
                 if event.key == pg.K_c:

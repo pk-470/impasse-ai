@@ -1,4 +1,5 @@
 import pickle
+from functools import cache
 from pathlib import Path
 from typing import Optional, TypedDict
 
@@ -80,6 +81,7 @@ def cell_to_string(cell: Optional[Cell]) -> Optional[str]:
     return None
 
 
+@cache
 def save_file_path() -> Path:
     """Return the recovery-save file path, creating its directory if needed."""
     return user_data_path("impasse", ensure_exists=True) / "last_position_data.p"
@@ -127,6 +129,9 @@ class GUI(Position):
         self.ai_player: Optional[AI] = (
             AI(ai_player, dev=self.dev) if ai_player else None
         )
+        self._last_tick_draw = 0
+        if self.ai_player is not None:
+            self.ai_player.on_tick = self.search_tick
         self.print_intro_message()
         if ai_player == WHITE:
             self.ai_play_turn_full()
@@ -174,8 +179,11 @@ class GUI(Position):
         self.selected = None
 
     def update_time(self) -> None:
-        """Count down the mover's clock by one second, ending the game in the opponent's favour if it reaches zero (called once a second)."""
-        if self.timed:
+        """
+        Count down the mover's clock by one second, ending the game in the opponent's favour if it reaches zero
+        (called once a second). A decided game's clock is left alone.
+        """
+        if self.timed and not self.winner:
             time_left = self.times[self.turn]
             if time_left is not None and time_left > 0:
                 self.times[self.turn] = time_left - 1
@@ -414,6 +422,30 @@ class GUI(Position):
         ):
             self.ai_play_turn_full()
 
+    def search_tick(self) -> None:
+        """
+        Keep the window responsive while the AI searches.
+
+        Called by the AI every few thousand nodes: pumps the event queue so the OS
+        does not mark the window unresponsive, and refreshes the AI's info box with
+        the depth in progress (at most five times a second).
+        """
+        pg.event.pump()
+        assert self.ai_player is not None
+        now = pg.time.get_ticks()
+        if now - self._last_tick_draw < 200:
+            return
+        self._last_tick_draw = now
+        color = self.ai_player.color
+        self.make_info_box(color)
+        img = self.fonts["info"].render(
+            f"thinking... depth {self.ai_player.current_depth}",
+            True,
+            OPPOSITE_COLOR[color],
+        )
+        self.window.blit(img, (WIDTH, INFO_HEIGHT_PLACEMENT[color] + HEIGHT // 4))
+        pg.display.update(info_box_draw_tuple(color))
+
     def ai_play_turn(self) -> None:
         """
         Plays a full turn (which may consist of multiple moves) for the AI.
@@ -440,6 +472,9 @@ class GUI(Position):
         # Leave selection disabled on a decided board so a click cannot act on a
         # stale move set once the game is over.
         self.selection_activated = not self.winner
+        # Clicks made while the search blocked the loop are not moves the player
+        # chose in this position, so they are discarded rather than replayed.
+        pg.event.clear(pg.MOUSEBUTTONDOWN)
 
     def ai_play_turn_full(self) -> None:
         """

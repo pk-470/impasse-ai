@@ -33,6 +33,10 @@ MAX_SEARCH_DEPTH = 64
 # iterative deepening stops as soon as one is found.
 MATE_THRESHOLD = WIN_VALUE // 2
 
+# How often the search calls back into on_tick (in nodes), so a front end can stay
+# responsive without paying a callback per node.
+TICK_INTERVAL_NODES = 4096
+
 # Bound the transposition table and eval cache so they cannot grow without limit
 # across a long game; once full, the oldest entries are evicted first (FIFO).
 TT_MAX_ENTRIES = 2_000_000
@@ -76,6 +80,18 @@ class AI:
         # Leaf-evaluation cache. evaluate() is a pure, turn-independent function of the
         # board, so it can be memoized by state_hash across the whole game/search.
         self.eval_cache: dict[int, int] = {}
+        # Killer moves (two per remaining-depth slot) and a table of cutoff counts,
+        # both used only to order quiet moves.
+        self.killers: list[list[Optional[Move]]] = [
+            [None, None] for _ in range(MAX_SEARCH_DEPTH + 2)
+        ]
+        self.history: dict[Move, int] = {}
+        # Optional no-argument callback, invoked every TICK_INTERVAL_NODES nodes so a
+        # front end can pump its event queue while the search runs. current_depth is
+        # the iterative-deepening depth in progress, for the caller to display.
+        self.on_tick: Optional[Callable[[], None]] = None
+        self.current_depth: int = 0
+        self._tick_countdown: int = TICK_INTERVAL_NODES
         # Per-move diagnostic counters, populated only when dev is on (see reset_stats).
         self.reset_stats()
 
@@ -323,6 +339,13 @@ class AI:
         ):
             raise ABTimeOut
 
+        # Let a front end pump its event queue without blocking for the whole search.
+        if self.on_tick is not None:
+            self._tick_countdown -= 1
+            if self._tick_countdown <= 0:
+                self._tick_countdown = TICK_INTERVAL_NODES
+                self.on_tick()
+
         if self.dev:
             self.nodes += 1
         old_alpha, old_beta = alpha, beta
@@ -413,10 +436,12 @@ class AI:
         if self.dev:
             self.reset_stats()
         self.search_start_time = milliseconds(time.time())
+        self._tick_countdown = TICK_INTERVAL_NODES
         # Seed with a safe fallback so a timeout before any depth completes still
         # returns a value (the depth-1 search is guaranteed to complete, however).
         prev_search_depth, prev_value, prev_best_move = 0, position.evaluate(), None
         while True:
+            self.current_depth = search_depth
             if search_depth > MIN_SEARCH_DEPTH:
                 self.min_search_depth_reached = True
             try:
