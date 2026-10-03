@@ -18,6 +18,18 @@ package (and its dependencies, pygame and platformdirs):
 uv sync
 ```
 
+### Optional: a stronger AI
+
+Compiling the search engine to C extensions roughly doubles its speed, letting
+it search about a ply deeper in the same thinking time. Needs a C compiler
+(MSVC on Windows, gcc or clang elsewhere).
+
+```bash
+uv run python scripts/build_native.py           # compile
+uv run python scripts/build_native.py --check   # show what is in use
+uv run python scripts/build_native.py --clean   # go back to pure Python
+```
+
 ## Playing
 
 Launch a game with `uv run impasse`:
@@ -55,13 +67,13 @@ needed. Nothing reloads it at startup — it is an undo buffer, not a saved game
 src/impasse/
 ├── __main__.py     # argparse CLI entry point (`impasse` / `python -m impasse`)
 ├── play.py         # pygame event loop
-├── position/       # board state, move generation, evaluation, Zobrist hashing
-│   ├── __init__.py
-│   └── _constants.py
-├── gui/            # pygame GUI wrapper
-│   ├── __init__.py
-│   └── _constants.py
-└── ai/             # alpha-beta search engine
-    ├── __init__.py
-    └── _constants.py
+├── position.py     # board state, move generation, evaluation, Zobrist hashing
+├── gui.py          # pygame GUI wrapper
+└── ai.py           # alpha-beta search engine
+
+scripts/
+├── bench.py        # throughput + cProfile
+├── build_native.py # compile position.py and ai.py with mypyc
+├── selfplay.py     # full-game integrity check
+└── gui_smoke.py    # headless GUI check
 ```

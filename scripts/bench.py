@@ -1,4 +1,11 @@
-"""Headless deterministic benchmark + profile for the Impasse engine."""
+"""Headless deterministic benchmark + profile for the Impasse engine.
+
+Pure-Python builds only. The node and eval counters below work by monkeypatching
+Position methods, and mypyc compiles intra-module calls to direct C calls that
+bypass the patch -- so on a compiled build every count reads zero and cProfile
+sees nothing, while the timings stay plausible. Rather than print that quietly,
+refuse to run: `python scripts/build_native.py --clean` first.
+"""
 import cProfile
 import io
 import pstats
@@ -8,6 +15,15 @@ import time
 import impasse.ai as ai_mod
 from impasse.ai import AI
 from impasse.position import Position, WHITE
+
+if not ai_mod.__file__.endswith(".py"):
+    sys.exit(
+        "bench.py needs a pure-Python build; impasse.ai is compiled:\n"
+        f"  {ai_mod.__file__}\n"
+        "Its counters monkeypatch Position, which a compiled build bypasses, so"
+        " every node/eval/nps column would read zero.\n"
+        "Run `python scripts/build_native.py --clean` first."
+    )
 
 # Disable time-based cutoff so depths are deterministic.
 ai_mod.MILLISECONDS_PER_MOVE = float("inf")

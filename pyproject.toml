@@ -15,6 +15,10 @@ classifiers = [
 dependencies = [
     "pygame>=2.6",
     "platformdirs>=4.0",
+    # position.py imports i64/mypyc_attr at module level. Interpreted these are a
+    # plain class and a no-op decorator; compiled they drive mypyc's codegen.
+    # Single pure-Python file, no transitive dependencies.
+    "mypy-extensions>=1.0",
 ]
 
 [project.scripts]
@@ -33,4 +37,8 @@ packages = ["src/impasse"]
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    # mypy ships mypyc, which scripts/build_native.py uses; setuptools is the
+    # build backend mypyc drives to invoke the C compiler.
+    "mypy>=1.13",
+    "setuptools>=70",
 ]

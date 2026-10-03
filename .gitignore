@@ -3,9 +3,11 @@ Video & Presentation
 ~$Impasse Presentation.pptx
 Code.zip
 
-# Python bytecode
+# Python bytecode and mypyc extensions (*.py[cod] covers .pyd)
 __pycache__/
 *.py[cod]
+.native_build.json
+.mypy_cache/
 
 # Packaging / build artifacts
 build/

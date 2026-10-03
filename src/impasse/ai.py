@@ -4,11 +4,12 @@ from typing import Callable, Optional, cast
 
 from impasse.position import (
     COLOR_CODES,
-    DIAG_INDICES,
+    DIAG_RAYS,
     EMPTY,
     MOVE_DIRECTIONS,
     OPPOSITE_COLOR,
     SINGLE_CODE,
+    TURN_BIT,
     WHITE,
     WIN_VALUE,
     Cell,
@@ -36,6 +37,11 @@ MATE_THRESHOLD = WIN_VALUE // 2
 # How often the search calls back into on_tick (in nodes), so a front end can stay
 # responsive without paying a callback per node.
 TICK_INTERVAL_NODES = 4096
+# How often the move's time budget is checked (in nodes). time.time() plus the
+# conversion to milliseconds costs more than most of a node's remaining bookkeeping,
+# and checking it per node bought nothing: at the engine's node rate 512 nodes is a
+# few milliseconds of overshoot against a 6000 ms budget.
+TIME_CHECK_INTERVAL_NODES = 512
 
 # Bound the transposition table and eval cache so they cannot grow without limit
 # across a long game; once full, the oldest entries are evicted first (FIFO).
@@ -69,9 +75,11 @@ class AI:
         """
         self.color: Color = color
         self.dev: bool = dev
-        # The TT is keyed on (state_hash, turn): the board hash alone collides for
-        # the same position with opposite sides to move, whose minimax values differ.
-        self.transposition_table: dict[tuple[int, Color], TTEntry] = {}
+        # The TT is keyed on the board hash shifted left with the side to move in
+        # bit 0: the hash alone collides for the same position with opposite sides to
+        # move, whose minimax values differ. One int hashes far cheaper than the
+        # (hash, colour-tuple) pair this used to be, and it is looked up twice a node.
+        self.transposition_table: dict[int, TTEntry] = {}
         # Search-state attributes (also set in iterative_deepening); defaulted here so
         # alpha_beta can be called directly.
         self.search_start_time: int = 0
@@ -92,6 +100,7 @@ class AI:
         self.on_tick: Optional[Callable[[], None]] = None
         self.current_depth: int = 0
         self._tick_countdown: int = TICK_INTERVAL_NODES
+        self._time_countdown: int = TIME_CHECK_INTERVAL_NODES
         # Per-move diagnostic counters, populated only when dev is on (see reset_stats).
         self.reset_stats()
 
@@ -118,7 +127,9 @@ class AI:
             The stored (value, move, flag, depth) entry, or a (0.0, None, None,
             None) sentinel whose None depth marks a miss.
         """
-        entry = self.transposition_table.get((position.state_hash, position.turn))
+        entry = self.transposition_table.get(
+            position.state_hash * 2 + TURN_BIT[position.turn]
+        )
         if self.dev:
             self.tt_lookups += 1
             if entry is not None:
@@ -151,7 +162,7 @@ class AI:
         """
         if self.dev:
             self.tt_stores += 1
-        key = (position.state_hash, position.turn)
+        key = position.state_hash * 2 + TURN_BIT[position.turn]
         table = self.transposition_table
         existing = table.get(key)
         if existing is not None:
@@ -199,72 +210,70 @@ class AI:
         slides_blocking_singles_once = []
         slides_blocking_singles_twice = []
         other_slides = []
-        all_legal_moves = position.all_legal_moves
         state = position.state
         enemy = OPPOSITE_COLOR[position.turn]
         enemy_double = COLOR_CODES[enemy][1]
         enemy_single = SINGLE_CODE[enemy]
-        double_dirs = MOVE_DIRECTIONS[(position.turn, 2)]
-        single_dirs = MOVE_DIRECTIONS[(position.turn, 1)]
-        for origin, moves in all_legal_moves.items():
-            for target, tag in moves.items():
-                move = (origin, target, tag)
-                if move == most_promising_move:
-                    check_first = [move]
-                elif move == killer_1 or move == killer_2:
-                    killer_moves.append(move)
-                elif tag == "C":
-                    crownings.append(move)
-                elif tag in ("B", "SB", "TB"):
-                    bear_offs.append(move)
-                elif tag in ("SC", "TC"):
-                    potential_crownings.append(move)
-                elif tag == "T":
-                    transposes.append(move)
-                elif tag == "S":
-                    # A slide is ranked by whether its destination ends up next to an
-                    # enemy double (blocking it) and then an enemy single, counting up
-                    # to two blocks. The first occupied square along each diagonal is
-                    # the only one that matters.
-                    assert target is not None
-                    target_index = _index(target)
-                    blocks_double_once = False
-                    blocks_double_twice = False
-                    for direction in double_dirs:
-                        for idx in DIAG_INDICES[(target_index, direction)]:
+        double_rays = DIAG_RAYS[(position.turn, 2)]
+        single_rays = DIAG_RAYS[(position.turn, 1)]
+        for move in position.moves_list:
+            origin, target, tag = move
+            if move == most_promising_move:
+                check_first = [move]
+            elif move == killer_1 or move == killer_2:
+                killer_moves.append(move)
+            elif tag == "C":
+                crownings.append(move)
+            elif tag in ("B", "SB", "TB"):
+                bear_offs.append(move)
+            elif tag in ("SC", "TC"):
+                potential_crownings.append(move)
+            elif tag == "T":
+                transposes.append(move)
+            elif tag == "S":
+                # A slide is ranked by whether its destination ends up next to an
+                # enemy double (blocking it) and then an enemy single, counting up
+                # to two blocks. The first occupied square along each diagonal is
+                # the only one that matters.
+                assert target is not None
+                base = (target[0] * 8 + target[1]) * 2
+                blocks_double_once = False
+                blocks_double_twice = False
+                for d in (0, 1):
+                    for idx in double_rays[base + d]:
+                        code = state[idx]
+                        if code == EMPTY:
+                            continue
+                        if code == enemy_double:
+                            if blocks_double_once:
+                                blocks_double_twice = True
+                            else:
+                                blocks_double_once = True
+                        break
+                if blocks_double_twice:
+                    slides_blocking_doubles_twice.append(move)
+                elif blocks_double_once:
+                    slides_blocking_doubles_once.append(move)
+                else:
+                    blocks_single_once = False
+                    blocks_single_twice = False
+                    for d in (0, 1):
+                        for idx in single_rays[base + d]:
                             code = state[idx]
                             if code == EMPTY:
                                 continue
-                            if code == enemy_double:
-                                if blocks_double_once:
-                                    blocks_double_twice = True
+                            if code == enemy_single:
+                                if blocks_single_once:
+                                    blocks_single_twice = True
                                 else:
-                                    blocks_double_once = True
+                                    blocks_single_once = True
                             break
-                    if blocks_double_twice:
-                        slides_blocking_doubles_twice.append(move)
-                    elif blocks_double_once:
-                        slides_blocking_doubles_once.append(move)
+                    if blocks_single_twice:
+                        slides_blocking_singles_twice.append(move)
+                    elif blocks_single_once:
+                        slides_blocking_singles_once.append(move)
                     else:
-                        blocks_single_once = False
-                        blocks_single_twice = False
-                        for direction in single_dirs:
-                            for idx in DIAG_INDICES[(target_index, direction)]:
-                                code = state[idx]
-                                if code == EMPTY:
-                                    continue
-                                if code == enemy_single:
-                                    if blocks_single_once:
-                                        blocks_single_twice = True
-                                    else:
-                                        blocks_single_once = True
-                                break
-                        if blocks_single_twice:
-                            slides_blocking_singles_twice.append(move)
-                        elif blocks_single_once:
-                            slides_blocking_singles_once.append(move)
-                        else:
-                            other_slides.append(move)
+                        other_slides.append(move)
 
         history = self.history
         if history:
@@ -317,12 +326,16 @@ class AI:
 
         # Terminate if you run out of time, but never before at least one full
         # depth has completed (so iterative_deepening always has a legal move).
-        move_time = milliseconds(time.time()) - self.search_start_time
-        if self.completed_any_depth and (
-            (move_time > MILLISECONDS_PER_MOVE and self.min_search_depth_reached)
-            or move_time > MAX_MILLISECONDS_PER_MOVE
-        ):
-            raise ABTimeOut
+        # Checked every TIME_CHECK_INTERVAL_NODES nodes, not every node.
+        self._time_countdown -= 1
+        if self._time_countdown <= 0:
+            self._time_countdown = TIME_CHECK_INTERVAL_NODES
+            move_time = milliseconds(time.time()) - self.search_start_time
+            if self.completed_any_depth and (
+                (move_time > MILLISECONDS_PER_MOVE and self.min_search_depth_reached)
+                or move_time > MAX_MILLISECONDS_PER_MOVE
+            ):
+                raise ABTimeOut
 
         # Let a front end pump its event queue without blocking for the whole search.
         if self.on_tick is not None:
@@ -435,6 +448,7 @@ class AI:
             self.reset_stats()
         self.search_start_time = milliseconds(time.time())
         self._tick_countdown = TICK_INTERVAL_NODES
+        self._time_countdown = TIME_CHECK_INTERVAL_NODES
         # Seed with a safe fallback so a timeout before any depth completes still
         # returns a value (the depth-1 search is guaranteed to complete, however).
         prev_search_depth: int = 0
@@ -509,19 +523,17 @@ class AI:
             flag that is True when it was the only legal move (returned without
             searching). The first three are None if there is no legal move.
         """
-        # If there is only one legal move, return it without searching.
-        if len(position.all_legal_moves) == 1:
-            origin, targets = next(iter(position.all_legal_moves.items()))
-            if len(targets) == 1:
-                target = next(iter(targets))
-                tag = targets[target]
-                single_value = position.evaluate()
-                print(
-                    f"Alpha-Beta evaluation: {single_value} at depth 0 (one legal move)"
-                )
-                if self.dev:
-                    print("[dev] 1 legal move — returned without searching")
-                return origin, target, tag, True
+        # If there is only one legal move, return it without searching. The flat
+        # list makes this exact: one entry means one move, where the nested dict
+        # needed a second check that one origin did not hide several targets.
+        moves = position.moves_list
+        if len(moves) == 1:
+            origin, target, tag = moves[0]
+            single_value = position.evaluate()
+            print(f"Alpha-Beta evaluation: {single_value} at depth 0 (one legal move)")
+            if self.dev:
+                print("[dev] 1 legal move — returned without searching")
+            return origin, target, tag, True
 
         depth, value, best_move = self.iterative_deepening(position)
         if best_move is None:
