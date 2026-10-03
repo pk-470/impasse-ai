@@ -44,9 +44,10 @@ active you can equivalently launch the game with `python -m impasse`.
 | `z` | Undo the last move (one move only)      |
 | `n` | Start a new game with the same settings |
 
-The current game state is saved between moves to a recovery file in your user
-data directory (e.g. `~/.local/share/impasse/` on Linux), so it lives outside the
-package and does not require write access to the install location.
+Before each human move the position is written to a file in your user data
+directory (e.g. `~/.local/share/impasse/` on Linux), which is what `z` reads to
+undo. It lives outside the package, so no write access to the install location is
+needed. Nothing reloads it at startup — it is an undo buffer, not a saved game.
 
 ## Project layout
 
