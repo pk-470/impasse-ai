@@ -1,0 +1,13 @@
+# Store text files with LF in the repository; check them out with native line
+# endings. Git decides what is text by inspecting content.
+* text=auto
+
+# Binaries: never convert.
+*.png  binary
+*.pdf  binary
+*.zip  binary
+*.pptx binary
+*.p    binary
+*.pyd  binary
+*.so   binary
+*.whl  binary
