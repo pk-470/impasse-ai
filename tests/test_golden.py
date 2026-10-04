@@ -1,4 +1,5 @@
-"""Golden-master behaviour lock for the performance refactor.
+"""
+Golden-master behaviour lock for the performance refactor.
 
 These digests are computed from the public, cell-based API only, so they MUST stay
 identical across every behaviour-preserving Phase 2 change (including the flat
@@ -34,7 +35,8 @@ def test_trajectory_digest_unchanged():
 
 
 def test_move_ordering_unchanged():
-    """Generation and ordering must emit the same moves in the same order.
+    """
+    Generation and ordering must emit the same moves in the same order.
 
     This is the one piece of behaviour the trajectory digest cannot check, and
     it is what decides between equally-valued moves. A constant-factor change to
@@ -50,7 +52,8 @@ def test_search_results_unchanged():
 
 
 def test_search_result_values_legal_and_tied():
-    """Value-only golden, robust to move-ordering changes.
+    """
+    Value-only golden, robust to move-ordering changes.
 
     The exact-move golden above legitimately breaks when a search-quality change
     (killers, history, aspiration, TT replacement) picks a different equally-good

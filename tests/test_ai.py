@@ -1,4 +1,5 @@
-"""Search/AI regression tests for impasse.ai.
+"""
+Search/AI regression tests for impasse.ai.
 
 Invariants guard the search; the bug-fix tests are red on the unfixed engine.
 """
@@ -6,7 +7,6 @@ Invariants guard the search; the bug-fix tests are red on the unfixed engine.
 from math import inf
 
 import pytest
-from boards import make_board
 
 import impasse.ai as ai_mod
 from impasse.ai import AI, INFINITY
@@ -18,10 +18,12 @@ from impasse.position import (
     Piece,
     Position,
 )
+from tests.boards import make_board
 
 
 def _armed(color=WHITE) -> AI:
-    """An AI whose search-state attributes are set so alpha_beta can be called
+    """
+    An AI whose search-state attributes are set so alpha_beta can be called
     directly (independent of iterative_deepening)."""
     ai = AI(color)
     ai.search_start_time = 0
@@ -59,7 +61,8 @@ def test_alpha_beta_returns_a_legal_move(no_time_limit):
 
 
 def test_iterative_deepening_finite_budget_returns_legal_move(monkeypatch):
-    """With a real (finite) time budget, iterative_deepening completes at least
+    """
+    With a real (finite) time budget, iterative_deepening completes at least
     depth 1 and returns a legal move."""
     monkeypatch.setattr(ai_mod, "MIN_SEARCH_DEPTH", 1)
     monkeypatch.setattr(ai_mod, "MILLISECONDS_PER_MOVE", 50)
@@ -72,7 +75,8 @@ def test_iterative_deepening_finite_budget_returns_legal_move(monkeypatch):
 
 
 def test_warm_caches_are_populated_and_consistent(no_time_limit):
-    """A search fills the eval cache and transposition table, and re-searching the
+    """
+    A search fills the eval cache and transposition table, and re-searching the
     same position from those warm caches returns the identical (value, move)."""
     pos = Position()
     ai = _armed()
@@ -91,7 +95,8 @@ def test_warm_caches_are_populated_and_consistent(no_time_limit):
 
 
 def test_suggested_move_single_legal_move_no_crash():
-    """Bug #2: a position with exactly one legal move returns it (unique_move=True)
+    """
+    Bug #2: a position with exactly one legal move returns it (unique_move=True)
     via the fast path instead of raising UnboundLocalError."""
     state: dict[Cell, Piece | None] = {}
     state[(7, 7)] = (WHITE, 1)  # impasse -> single forced bear-off
@@ -105,7 +110,8 @@ def test_suggested_move_single_legal_move_no_crash():
 
 
 def test_iterative_deepening_survives_immediate_timeout(monkeypatch):
-    """Bug #5: if the very first (depth-1) search would time out, iterative_deepening
+    """
+    Bug #5: if the very first (depth-1) search would time out, iterative_deepening
     must still return a legal move rather than raising UnboundLocalError."""
     monkeypatch.setattr(ai_mod, "MAX_MILLISECONDS_PER_MOVE", -1)
     pos = Position()
@@ -135,7 +141,8 @@ def test_tt_depth_preferred_replacement_keeps_deeper_entry():
 
 
 def test_tt_and_eval_cache_eviction_is_bounded_and_sound(no_time_limit, monkeypatch):
-    """A tiny TT/eval-cache cap bounds both tables yet still returns the correct
+    """
+    A tiny TT/eval-cache cap bounds both tables yet still returns the correct
     search value: eviction only loses memoization, it never corrupts results."""
     monkeypatch.setattr(ai_mod, "TT_MAX_ENTRIES", 50)
     monkeypatch.setattr(ai_mod, "EVAL_CACHE_MAX_ENTRIES", 50)
@@ -155,7 +162,8 @@ def test_tt_and_eval_cache_eviction_is_bounded_and_sound(no_time_limit, monkeypa
 
 
 def test_tt_key_distinguishes_side_to_move(no_time_limit):
-    """Bug #1: priming the transposition table from a White-to-move search must not
+    """
+    Bug #1: priming the transposition table from a White-to-move search must not
     corrupt a subsequent Black-to-move search of the same board."""
     ai = _armed()
     ai.completed_any_depth = True
@@ -239,7 +247,8 @@ def _forced_result_position() -> Position:
 
 
 def test_iterative_deepening_stops_on_forced_result(no_time_limit):
-    """A proven forced win/loss stops iterative deepening via the mate exit, well
+    """
+    A proven forced win/loss stops iterative deepening via the mate exit, well
     below the depth cap, instead of spinning the depth counter."""
     depth, value, move = AI(WHITE).iterative_deepening(_forced_result_position())
     assert abs(value) >= ai_mod.MATE_THRESHOLD, (
@@ -250,7 +259,8 @@ def test_iterative_deepening_stops_on_forced_result(no_time_limit):
 
 
 def test_iterative_deepening_respects_depth_cap(no_time_limit, monkeypatch):
-    """When no forced result is yet in reach, the depth cap bounds the search rather
+    """
+    When no forced result is yet in reach, the depth cap bounds the search rather
     than letting a cheaply-resolved position run away."""
     monkeypatch.setattr(ai_mod, "MAX_SEARCH_DEPTH", 8)
     depth, _, move = AI(WHITE).iterative_deepening(_forced_result_position())
@@ -259,7 +269,8 @@ def test_iterative_deepening_respects_depth_cap(no_time_limit, monkeypatch):
 
 
 def test_a_real_win_outranks_a_heuristic_line():
-    """A terminal win must score above any heuristic position, so a winning move is
+    """
+    A terminal win must score above any heuristic position, so a winning move is
     never ranked below a merely material-heavy one."""
     win: dict[Cell, Piece | None] = {}
     win[(7, 7)] = (WHITE, 1)  # White's only checker -> forced bear-off -> White wins

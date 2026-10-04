@@ -1,4 +1,5 @@
-"""Readable board construction for the tests.
+"""
+Readable board construction for the tests.
 
 `Position` takes a flat list of 64 square codes. A test is clearer when it names
 the pieces it places, so these build that list from a {cell: piece} mapping. The

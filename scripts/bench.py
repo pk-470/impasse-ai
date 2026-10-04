@@ -1,4 +1,5 @@
-"""Headless deterministic benchmark + profile for the Impasse engine.
+"""
+Headless deterministic benchmark + profile for the Impasse engine.
 
 Pure-Python builds only. The node and eval counters below work by monkeypatching
 Position methods, and mypyc compiles intra-module calls to direct C calls that

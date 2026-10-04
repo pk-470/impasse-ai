@@ -1,4 +1,5 @@
-"""Headless AI-vs-AI full game to completion at shallow depth: integration test
+"""
+Headless AI-vs-AI full game to completion at shallow depth: integration test
 that the fixes don't crash through endgames / single-move positions / crownings."""
 
 import impasse.ai as ai_mod

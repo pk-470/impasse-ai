@@ -1,11 +1,4 @@
-"""
-The Impasse board: state, move generation, move application and evaluation.
-
-A board is a flat list of 64 int square codes (see PIECE_TO_CODE) indexed by
-row * 8 + col; only the 32 dark squares are ever occupied. The pathfinders and
-the evaluation pass each exist in a pure-Python and a mypyc-native flavour that
-must stay behaviour-identical; NATIVE chooses between them.
-"""
+"""The Impasse board: state, move generation, move application and evaluation."""
 
 from __future__ import annotations
 

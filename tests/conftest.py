@@ -1,4 +1,5 @@
-"""Refuse to run the suite against stale compiled extensions.
+"""
+Refuse to run the suite against stale compiled extensions.
 
 `scripts/build_native.py` writes the mypyc extensions next to their sources, and
 an extension module shadows a same-named `.py`. So after editing `position.py` or

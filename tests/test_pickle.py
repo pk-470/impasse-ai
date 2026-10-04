@@ -1,4 +1,5 @@
-"""Pickle round-trip lock for the board representation.
+"""
+Pickle round-trip lock for the board representation.
 
 The GUI persists the raw board (self.state) to a recovery file via pickle and
 reconstructs a position from it on undo. These tests pin that contract so the

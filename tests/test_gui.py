@@ -1,4 +1,5 @@
-"""Headless GUI-logic tests driving the real GUI methods.
+"""
+Headless GUI-logic tests driving the real GUI methods.
 
 Uses SDL's dummy video/audio drivers (no window) and redirects the recovery
 pickle to a temp file, so the select -> complete_move -> update and the

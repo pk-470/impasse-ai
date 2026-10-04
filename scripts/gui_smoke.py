@@ -1,4 +1,5 @@
-"""Headless GUI smoke test: exercises draw_checker (piece_at decode), the info/
+"""
+Headless GUI smoke test: exercises draw_checker (piece_at decode), the info/
 highlight rendering, and the pickle save/load+undo round-trip through real GUI
 methods, using SDL's dummy video/audio drivers (no window)."""
 

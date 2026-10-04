@@ -1,4 +1,5 @@
-"""The two pathfinder flavours must agree exactly.
+"""
+The two pathfinder flavours must agree exactly.
 
 `position.py` carries a pure-Python and a mypyc-native implementation of each
 pathfinder and picks one via `NATIVE` (see position.NATIVE). Only one of them
@@ -49,7 +50,8 @@ def _selfplay_positions(count, seed=12345):
 
 
 def test_eval_paths_flavours_agree():
-    """Both evaluation passes return the same three scores on every board.
+    """
+    Both evaluation passes return the same three scores on every board.
 
     This covers the walkers and the board pass that drives them: the pure
     flavour reads the `list[int]` board, the native one a `bytes` snapshot of
@@ -68,7 +70,8 @@ def test_eval_paths_flavours_agree():
 
 
 def test_split_colour_tables_match_the_dicts():
-    """The per-colour globals the evaluation pass reads are the dict entries.
+    """
+    The per-colour globals the evaluation pass reads are the dict entries.
 
     The fused pass indexes these instead of hashing a Color per piece, so a
     mismatch would silently score one side with the other's tables.
@@ -85,7 +88,8 @@ def test_split_colour_tables_match_the_dicts():
 
 
 def test_home_mask_matches_home_indices():
-    """The bitmask home row encodes exactly the frozenset one.
+    """
+    The bitmask home row encodes exactly the frozenset one.
 
     HOME_MASK is stored two's-complement because square 63 is a home square and
     an unsigned mask overflows mypyc's signed i64; this pins the equivalence.
@@ -99,7 +103,8 @@ def test_home_mask_matches_home_indices():
 
 
 def test_rays_match_nested_diagonals():
-    """The flat `bytes` ray table holds the same indices as the nested lists.
+    """
+    The flat `bytes` ray table holds the same indices as the nested lists.
 
     Each (anchor, direction) slot owns a fixed-stride span terminated by
     RAY_END, which is what lets the native walkers read a step as one byte and
@@ -158,7 +163,8 @@ def test_slide_rays_match_diagonals():
 
 
 def test_turn_bit_is_keyed_by_value_not_identity():
-    """An unpickled turn colour must still map to the right side-to-move bit.
+    """
+    An unpickled turn colour must still map to the right side-to-move bit.
 
     gui.py's undo path assigns a turn colour straight out of a pickle, which is an
     equal but distinct tuple. The transposition-table key is built from TURN_BIT,
@@ -175,7 +181,8 @@ def test_turn_bit_is_keyed_by_value_not_identity():
 
 
 def test_diag_rays_match_diag_indices():
-    """DIAG_RAYS holds the same indices as the (anchor, direction)-keyed table.
+    """
+    DIAG_RAYS holds the same indices as the (anchor, direction)-keyed table.
 
     This is the flat table ai.ordered_moves reads when scoring how well a slide
     blocks an enemy checker, and it was the one new table not pinned here.

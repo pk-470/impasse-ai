@@ -1,4 +1,5 @@
-"""Representation-independent golden-master helpers for the performance refactor.
+"""
+Representation-independent golden-master helpers for the performance refactor.
 
 Everything here reads only the PUBLIC, cell-based API (all_legal_moves, evaluate,
 checkers_total[WHITE/BLACK], winner, turn) and references the module WHITE/BLACK
@@ -44,7 +45,8 @@ def position_features(pos):
 
 
 def trajectory_digest(seed=12345, max_positions=4000, max_games=300):
-    """Digest of the observable trajectory of seeded random self-play games.
+    """
+    Digest of the observable trajectory of seeded random self-play games.
 
     Deterministic given (seed) and the move generator; sensitive to any change in
     evaluate() or legal-move generation.
@@ -68,7 +70,8 @@ def trajectory_digest(seed=12345, max_positions=4000, max_games=300):
 
 
 def ordering_digest(seed=4242, max_positions=1200, max_games=200):
-    """Digest of move *ordering*, which trajectory_digest cannot see.
+    """
+    Digest of move *ordering*, which trajectory_digest cannot see.
 
     `_legal_moves` sorts, so the trajectory digest is blind both to the order
     move generation emits moves in and to the order `ai.ordered_moves` puts them
@@ -126,7 +129,8 @@ def _replay_to(seed, n_moves):
 
 
 def search_results(seed=999, offsets=(0, 6, 12, 20, 30), depth=4):
-    """Fixed-depth alpha_beta (value, move) from several seeded midgame positions.
+    """
+    Fixed-depth alpha_beta (value, move) from several seeded midgame positions.
 
     Locks the exact search behaviour. Time cutoffs are disabled for determinism.
     """
@@ -160,7 +164,8 @@ def _is_legal(pos, move):
 
 
 def search_values_legal_tied(seed=999, offsets=(0, 6, 12, 20, 30), depth=4):
-    """Per-offset (off, value, move_is_legal, move_attains_value) for the value-only
+    """
+    Per-offset (off, value, move_is_legal, move_attains_value) for the value-only
     golden.
 
     Tolerant of move-ordering changes (killers, history, aspiration, TT

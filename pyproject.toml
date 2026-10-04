@@ -5,21 +5,14 @@ description = "Alpha-beta search engine and pygame GUI for Mark Steere's board g
 readme = "README.md"
 requires-python = ">=3.13"
 authors = [{ name = "pk-470", email = "parmenkouts99@gmail.com" }]
-keywords = ["impasse", "board-game", "alpha-beta", "game-ai", "pygame"]
+keywords = ["alpha-beta", "board-game", "game-ai", "impasse", "pygame"]
 classifiers = [
-    "Programming Language :: Python :: 3.13",
-    "Operating System :: OS Independent",
     "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Games/Entertainment :: Board Games",
 ]
-dependencies = [
-    "pygame>=2.6",
-    "platformdirs>=4.0",
-    # position.py imports i64/mypyc_attr at module level. Interpreted these are a
-    # plain class and a no-op decorator; compiled they drive mypyc's codegen.
-    # Single pure-Python file, no transitive dependencies.
-    "mypy-extensions>=1.0",
-]
+dependencies = ["mypy-extensions>=1.0", "platformdirs>=4.0", "pygame>=2.6"]
 
 [project.scripts]
 impasse = "impasse.__main__:main"
@@ -34,11 +27,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/impasse"]
 
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+include = ["scripts", "src", "tests"]
+exclude = ["**/.*_cache", "**/__pycache__", "**/build", "**/dist"]
+
 [dependency-groups]
-dev = [
-    "pytest>=9.1.1",
-    # mypy ships mypyc, which scripts/build_native.py uses; setuptools is the
-    # build backend mypyc drives to invoke the C compiler.
-    "mypy>=1.13",
-    "setuptools>=70",
-]
+dev = ["mypy>=1.13", "pytest>=9.1.1", "setuptools>=70"]

@@ -1,4 +1,5 @@
-"""Compile the engine's hot modules to C extensions with mypyc, in place.
+"""
+Compile the engine's hot modules to C extensions with mypyc, in place.
 
 The extensions land next to their sources in `src/impasse/`. Python's import
 system prefers an extension module over a same-named `.py` in the same
@@ -109,7 +110,8 @@ def source_digests() -> dict[str, str]:
 
 
 def stale_sources() -> list[str]:
-    """Modules whose source differs from what was last compiled.
+    """
+    Modules whose source differs from what was last compiled.
 
     Content-based, not mtime-based. mypyc's own cache is content-based, so a
     source whose mtime moved without its bytes changing is correctly *not*

@@ -1,6 +1,4 @@
-"""
-Pygame front end: board rendering, input handling and the recovery file.
-"""
+"""Pygame front end: board rendering, input handling and the recovery file."""
 
 import pickle
 from functools import cache

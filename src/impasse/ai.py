@@ -2,8 +2,7 @@
 Alpha-beta search for Impasse.
 
 Fixed-depth alpha-beta with move ordering, iterative deepening under a time
-budget, a transposition table and a leaf-evaluation cache. The search works in
-ints throughout, so a compiled build never boxes a float into a table entry.
+budget, a transposition table and a leaf-evaluation cache.
 """
 
 import time

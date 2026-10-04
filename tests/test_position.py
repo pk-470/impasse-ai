@@ -1,4 +1,5 @@
-"""Game-logic regression tests for impasse.position.
+"""
+Game-logic regression tests for impasse.position.
 
 Split into two groups:
   * invariants  - encode behaviour that is already correct and must never change
@@ -10,7 +11,6 @@ Split into two groups:
 import random
 
 import pytest
-from boards import make_board
 
 from impasse.position import (
     BLACK,
@@ -22,6 +22,7 @@ from impasse.position import (
     Position,
     _make_state_hash,
 )
+from tests.boards import make_board
 
 
 def perft(pos: Position, depth: int) -> int:
@@ -120,7 +121,8 @@ def test_winner_on_last_bear_off():
 
 
 def test_chained_crowning_keeps_turn():
-    """Bug #3 (update 'C'): crowning one of several mandatory crownings must keep
+    """
+    Bug #3 (update 'C'): crowning one of several mandatory crownings must keep
     the turn with the mover and offer the remaining crownings."""
     state = _empty_board()
     state.update(
@@ -147,7 +149,8 @@ def test_chained_crowning_keeps_turn():
 
 
 def test_incoming_mandatory_crowning_is_offered():
-    """Bug #4 (change_turn): when the turn passes to a side that owes a mandatory
+    """
+    Bug #4 (change_turn): when the turn passes to a side that owes a mandatory
     crowning, change_turn must offer it (get_all_legal_moves, not get_other_moves)."""
     state = _empty_board()
     state.update(
@@ -166,7 +169,8 @@ def test_incoming_mandatory_crowning_is_offered():
 
 
 def test_crownings_offer_every_legal_helper_target_pair():
-    """Every (helper, furthest-row single) pair is offered, not just the last one.
+    """
+    Every (helper, furthest-row single) pair is offered, not just the last one.
 
     Keying the crownings map by helper origin alone used to drop A1 -> B8 here.
     """
