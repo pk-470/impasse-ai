@@ -13,20 +13,15 @@ import random
 from impasse.position import (
     BEAR_DIAGS,
     BEAR_RAYS,
+    BLACK,
     CROWN_DIAGS,
     CROWN_RAYS,
-    DARK_INDICES,
     HOME_INDICES,
     HOME_MASK,
-    OPPOSITE_COLOR,
-    SINGLE_CODE,
-    BLACK,
     WHITE,
     Position,
-    _future_bear_offs_native,
-    _future_bear_offs_pure,
-    _future_crowns_native,
-    _future_crowns_pure,
+    _eval_paths_native,
+    _eval_paths_pure,
 )
 
 
@@ -52,67 +47,40 @@ def _selfplay_positions(count, seed=12345):
     return out
 
 
-def _buckets(pos, color):
-    """That colour's single and double square indices."""
-    single_code = SINGLE_CODE[color]
-    double_code = single_code + 1
-    singles, doubles = [], []
-    for idx in DARK_INDICES:
-        code = pos.state[idx]
-        if code == single_code:
-            singles.append(idx)
-        elif code == double_code:
-            doubles.append(idx)
-    return singles, doubles
+def test_eval_paths_flavours_agree():
+    """Both evaluation passes return the same three scores on every board.
 
-
-def test_bear_off_flavours_agree():
-    """Both bear-off implementations return the same score on every board."""
+    This covers the walkers and the board pass that drives them: the pure
+    flavour reads the `list[int]` board, the native one a `bytes` snapshot of
+    it, and only one of the two runs in any given build.
+    """
     checked = 0
     for pos in _selfplay_positions(400):
-        for color in (WHITE, BLACK):
-            _, doubles = _buckets(pos, color)
-            pure = _future_bear_offs_pure(
-                pos.state,
-                SINGLE_CODE[color],
-                HOME_INDICES[color],
-                BEAR_DIAGS[color],
-                doubles,
-            )
-            native = _future_bear_offs_native(
-                pos.state,
-                SINGLE_CODE[color],
-                HOME_MASK[color],
-                BEAR_RAYS[color],
-                doubles,
-            )
-            assert pure == native, (
-                f"bear-off flavours disagree: pure={pure} native={native} "
-                f"color={color} state={pos.state}"
-            )
-            checked += 1
-    assert checked == 800
+        pure = _eval_paths_pure(pos.state)
+        native = _eval_paths_native(bytes(pos.state))
+        assert pure == native, (
+            f"evaluation flavours disagree: pure={pure} native={native} "
+            f"state={pos.state}"
+        )
+        checked += 1
+    assert checked == 400
 
 
-def test_crown_flavours_agree():
-    """Both crowning implementations return the same score on every board."""
-    checked = 0
-    for pos in _selfplay_positions(400):
-        for color in (WHITE, BLACK):
-            singles, _ = _buckets(pos, color)
-            enemy = OPPOSITE_COLOR[color]
-            pure = _future_crowns_pure(
-                pos.state, HOME_INDICES[enemy], CROWN_DIAGS[color], singles
+def test_split_colour_tables_match_the_dicts():
+    """The per-colour globals the evaluation pass reads are the dict entries.
+
+    The fused pass indexes these instead of hashing a Color per piece, so a
+    mismatch would silently score one side with the other's tables.
+    """
+    from impasse import position as P
+
+    for color, suffix in ((WHITE, "WHITE"), (BLACK, "BLACK")):
+        for name in ("BEAR_DIAGS", "CROWN_DIAGS", "HOME_INDICES",
+                     "BEAR_RAYS", "CROWN_RAYS", "HOME_MASK"):
+            assert getattr(P, f"{name}_{suffix}") == getattr(P, name)[color], (
+                f"{name}_{suffix} does not match {name}[{color}]"
             )
-            native = _future_crowns_native(
-                pos.state, HOME_MASK[enemy], CROWN_RAYS[color], singles
-            )
-            assert pure == native, (
-                f"crown flavours disagree: pure={pure} native={native} "
-                f"color={color} state={pos.state}"
-            )
-            checked += 1
-    assert checked == 800
+    assert list(P.DARK_BYTES) == P.DARK_INDICES
 
 
 def test_home_mask_matches_home_indices():
@@ -130,16 +98,27 @@ def test_home_mask_matches_home_indices():
 
 
 def test_rays_match_nested_diagonals():
-    """The flat `bytes` rays hold the same indices as the nested-list diagonals."""
+    """The flat `bytes` ray table holds the same indices as the nested lists.
+
+    Each (anchor, direction) slot owns a fixed-stride span terminated by
+    RAY_END, which is what lets the native walkers read a step as one byte and
+    stop without a length. Both the squares and the terminator are pinned.
+    """
+    from impasse.position import RAY_END, RAY_STRIDE
+
     for color in (WHITE, BLACK):
-        for anchor in range(64):
-            for i in (0, 1):
-                assert list(BEAR_RAYS[color][anchor * 2 + i]) == (
-                    BEAR_DIAGS[color][anchor][i]
-                )
-                assert list(CROWN_RAYS[color][anchor * 2 + i]) == (
-                    CROWN_DIAGS[color][anchor][i]
-                )
+        for flat, nested in (
+            (BEAR_RAYS[color], BEAR_DIAGS[color]),
+            (CROWN_RAYS[color], CROWN_DIAGS[color]),
+        ):
+            assert len(flat) == 128 * RAY_STRIDE
+            for anchor in range(64):
+                for i in (0, 1):
+                    base = (anchor * 2 + i) * RAY_STRIDE
+                    span = flat[base : base + RAY_STRIDE]
+                    ray = nested[anchor][i]
+                    assert list(span[: len(ray)]) == ray
+                    assert span[len(ray)] == RAY_END
 
 
 def test_home_table_matches_home_indices():

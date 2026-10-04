@@ -44,7 +44,9 @@ STAMP = SRC / ".native_build.json"
 # enabled, or cl.exe fails with the unhelpful:
 #   fatal error C1083: Cannot open compiler generated file: '': Invalid argument
 MAX_PATH_BUDGET = 260
-_PROBE = "build/temp.win-amd64-cpython-313/Release/build/__native_0123456789abcdef0123.obj"
+_PROBE = (
+    "build/temp.win-amd64-cpython-313/Release/build/__native_0123456789abcdef0123.obj"
+)
 
 
 def compiled_artifacts() -> list[Path]:
@@ -138,7 +140,10 @@ def check() -> int:
     else:
         print("compiled extensions in place:", flush=True)
         for path in sorted(found):
-            print(f"  {path.relative_to(SRC)}  ({path.stat().st_size:,} bytes)", flush=True)
+            print(
+                f"  {path.relative_to(SRC)}  ({path.stat().st_size:,} bytes)",
+                flush=True,
+            )
         stale = stale_sources()
         if stale:
             print(flush=True)
@@ -151,17 +156,15 @@ def check() -> int:
                 "  The extension shadows the source, so this is running OLD code.",
                 flush=True,
             )
-            print(
-                "  Rebuild (python scripts/build_native.py) or --clean.", flush=True
-            )
+            print("  Rebuild (python scripts/build_native.py) or --clean.", flush=True)
             return 1
     # Import in a subprocess so this script never holds an extension open (Windows
     # locks a loaded .pyd, which would make a later --clean fail).
     probe = (
-        "import sys; sys.path.insert(0, r'%s');"
+        f"import sys; sys.path.insert(0, r'{SRC}');"
         "from impasse.position import NATIVE;"
         "print('pathfinders:', 'native (mypyc)' if NATIVE else 'pure Python')"
-    ) % SRC
+    )
     subprocess.run([sys.executable, "-c", probe])
     return 0
 

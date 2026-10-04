@@ -6,6 +6,7 @@ bypass the patch -- so on a compiled build every count reads zero and cProfile
 sees nothing, while the timings stay plausible. Rather than print that quietly,
 refuse to run: `python scripts/build_native.py --clean` first.
 """
+
 import cProfile
 import io
 import pstats
@@ -14,7 +15,7 @@ import time
 
 import impasse.ai as ai_mod
 from impasse.ai import AI
-from impasse.position import Position, WHITE
+from impasse.position import WHITE, Position
 
 if not ai_mod.__file__.endswith(".py"):
     sys.exit(
@@ -34,17 +35,25 @@ EVALS = 0
 
 # Instrument node + eval counts.
 _orig_new = Position.new_position_after_move
+
+
 def _counted_new(self, *a, **k):
     global NODES
     NODES += 1
     return _orig_new(self, *a, **k)
+
+
 Position.new_position_after_move = _counted_new
 
 _orig_eval = Position.evaluate
+
+
 def _counted_eval(self):
     global EVALS
     EVALS += 1
     return _orig_eval(self)
+
+
 Position.evaluate = _counted_eval
 
 
@@ -80,8 +89,10 @@ def bench(label, pos, depths):
         val, mv = ai.alpha_beta(pos, d, float("-inf"), float("inf"))
         dt = time.perf_counter() - t0
         nps = NODES / dt if dt else 0
-        print(f"  depth {d}: {dt:7.3f}s  nodes={NODES:>9}  evals={EVALS:>9}  "
-              f"nps={nps:>10.0f}  val={val:.0f}  tt={len(ai.transposition_table)}")
+        print(
+            f"  depth {d}: {dt:7.3f}s  nodes={NODES:>9}  evals={EVALS:>9}  "
+            f"nps={nps:>10.0f}  val={val:.0f}  tt={len(ai.transposition_table)}"
+        )
 
 
 if __name__ == "__main__":

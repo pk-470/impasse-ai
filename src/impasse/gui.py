@@ -1,7 +1,7 @@
 import pickle
 from functools import cache
 from pathlib import Path
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import pygame as pg
 from platformdirs import user_data_path
@@ -24,8 +24,8 @@ class LastMoveData(TypedDict):
     """The cells touched by the last move, the side that made it, and its tag."""
 
     cells: list[Cell]
-    color: Optional[Color]
-    tag: Optional[MoveTag]
+    color: Color | None
+    tag: MoveTag | None
 
 
 WIDTH, HEIGHT = 640, 640
@@ -74,7 +74,7 @@ def calculate_coords(cell: Cell) -> tuple[float, float]:
     )
 
 
-def cell_to_string(cell: Optional[Cell]) -> Optional[str]:
+def cell_to_string(cell: Cell | None) -> str | None:
     """Return a cell's board coordinate (e.g. "C4"), or None if cell is None."""
     if cell:
         return f"{COLUMN_COORDS_NUMBERS[cell[0]]}{cell[1] + 1}"
@@ -93,8 +93,8 @@ class GUI(Position):
     def __init__(
         self,
         window: pg.Surface,
-        secs: Optional[int] = None,
-        ai_player: Optional[Color] = None,
+        secs: int | None = None,
+        ai_player: Color | None = None,
         dev: bool = False,
     ) -> None:
         """
@@ -116,19 +116,17 @@ class GUI(Position):
         }
         self.new_game(secs, ai_player)
 
-    def new_game(self, secs: Optional[int], ai_player: Optional[Color]) -> None:
+    def new_game(self, secs: int | None, ai_player: Color | None) -> None:
         """Start a new game from the opening position with the given clock and AI side."""
         self.make_position()
         self.last_move_data: LastMoveData = {"cells": [], "color": None, "tag": None}
         self.undo_activated = False
-        self.times: dict[Color, Optional[int]] = {WHITE: secs, BLACK: secs}
+        self.times: dict[Color, int | None] = {WHITE: secs, BLACK: secs}
         self.export_position_data()
         self.selection_activated = True
         self.selected = None
         self.show_cells = True
-        self.ai_player: Optional[AI] = (
-            AI(ai_player, dev=self.dev) if ai_player else None
-        )
+        self.ai_player: AI | None = AI(ai_player, dev=self.dev) if ai_player else None
         self._last_tick_draw = 0
         if self.ai_player is not None:
             self.ai_player.on_tick = self.search_tick
@@ -371,7 +369,7 @@ class GUI(Position):
             else:
                 self.selected = cell
 
-    def complete_move(self, origin: Cell, target: Optional[Cell], tag: MoveTag) -> None:
+    def complete_move(self, origin: Cell, target: Cell | None, tag: MoveTag) -> None:
         """
         Apply a move made on the board, recording it for display and recovery.
 

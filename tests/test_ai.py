@@ -8,7 +8,7 @@ from math import inf
 import pytest
 
 import impasse.ai as ai_mod
-from impasse.ai import AI
+from impasse.ai import AI, INFINITY
 from impasse.position import BLACK, INITIAL_STATE, WHITE, LegacyState, Position
 
 
@@ -45,7 +45,7 @@ def no_time_limit(monkeypatch):
 
 def test_alpha_beta_returns_a_legal_move(no_time_limit):
     pos = Position()
-    _, move = _armed().alpha_beta(pos, 3, -inf, inf)
+    _, move = _armed().alpha_beta(pos, 3, -INFINITY, INFINITY)
     assert move is not None
     assert _legal(pos, move)
 
@@ -69,11 +69,11 @@ def test_warm_caches_are_populated_and_consistent(no_time_limit):
     pos = Position()
     ai = _armed()
     ai.completed_any_depth = True
-    first = ai.alpha_beta(pos, 4, -inf, inf)
+    first = ai.alpha_beta(pos, 4, -INFINITY, INFINITY)
     assert ai.eval_cache, "leaf evaluations should be memoized"
     assert ai.transposition_table, "search results should be stored"
 
-    second = ai.alpha_beta(pos, 4, -inf, inf)
+    second = ai.alpha_beta(pos, 4, -INFINITY, INFINITY)
     assert second == first
 
 
@@ -110,13 +110,13 @@ def test_tt_depth_preferred_replacement_keeps_deeper_entry():
     """tt_store keeps the result searched to the greater depth for a position."""
     ai = AI(WHITE)
     pos = Position()
-    ai.tt_store(pos, 5.0, None, "E", 2)
-    ai.tt_store(pos, 7.0, None, "E", 6)
-    assert ai.tt_retrieve(pos)[0] == 7.0  # deeper result kept
-    ai.tt_store(pos, 9.0, None, "E", 3)  # shallower must not displace it
-    assert ai.tt_retrieve(pos)[0] == 7.0
-    ai.tt_store(pos, 11.0, None, "E", 6)  # equal-or-deeper replaces
-    assert ai.tt_retrieve(pos)[0] == 11.0
+    ai.tt_store(pos, 5, None, "E", 2)
+    ai.tt_store(pos, 7, None, "E", 6)
+    assert ai.tt_retrieve(pos)[0] == 7  # deeper result kept
+    ai.tt_store(pos, 9, None, "E", 3)  # shallower must not displace it
+    assert ai.tt_retrieve(pos)[0] == 7
+    ai.tt_store(pos, 11, None, "E", 6)  # equal-or-deeper replaces
+    assert ai.tt_retrieve(pos)[0] == 11
 
 
 def test_tt_and_eval_cache_eviction_is_bounded_and_sound(no_time_limit, monkeypatch):
@@ -127,7 +127,7 @@ def test_tt_and_eval_cache_eviction_is_bounded_and_sound(no_time_limit, monkeypa
     pos = Position()
     bounded = _armed()
     bounded.completed_any_depth = True
-    bounded_value, _ = bounded.alpha_beta(pos, 4, -inf, inf)
+    bounded_value, _ = bounded.alpha_beta(pos, 4, -INFINITY, INFINITY)
     assert len(bounded.transposition_table) <= 50
     assert len(bounded.eval_cache) <= 50
 
@@ -135,7 +135,7 @@ def test_tt_and_eval_cache_eviction_is_bounded_and_sound(no_time_limit, monkeypa
     monkeypatch.setattr(ai_mod, "EVAL_CACHE_MAX_ENTRIES", 10_000_000)
     unbounded = _armed()
     unbounded.completed_any_depth = True
-    unbounded_value, _ = unbounded.alpha_beta(pos, 4, -inf, inf)
+    unbounded_value, _ = unbounded.alpha_beta(pos, 4, -INFINITY, INFINITY)
     assert bounded_value == unbounded_value
 
 
@@ -145,12 +145,12 @@ def test_tt_key_distinguishes_side_to_move(no_time_limit):
     ai = _armed()
     ai.completed_any_depth = True
     # Prime the TT with a White-to-move search of the opening.
-    ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=WHITE), 3, -inf, inf)
-    primed = ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -inf, inf)
+    ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=WHITE), 3, -INFINITY, INFINITY)
+    primed = ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -INFINITY, INFINITY)
 
     fresh_ai = _armed()
     fresh_ai.completed_any_depth = True
-    fresh = fresh_ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -inf, inf)
+    fresh = fresh_ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -INFINITY, INFINITY)
 
     assert primed == fresh, "TT primed for the other side must not change the result"
 
@@ -167,7 +167,7 @@ def test_dev_stats_collected_and_consistent(no_time_limit):
     ai.dev = True
     ai.completed_any_depth = True
     ai.reset_stats()
-    ai.alpha_beta(pos, 4, -inf, inf)
+    ai.alpha_beta(pos, 4, -INFINITY, INFINITY)
     assert ai.nodes > 0
     assert ai.tt_stores > 0
     # Hits are a subset of lookups; cutoffs are a subset of hits.
@@ -179,7 +179,7 @@ def test_dev_counters_stay_zero_when_off(no_time_limit):
     """With dev off, the counters are never touched (zero search overhead)."""
     ai = _armed()
     ai.completed_any_depth = True
-    ai.alpha_beta(Position(), 4, -inf, inf)
+    ai.alpha_beta(Position(), 4, -INFINITY, INFINITY)
     assert (ai.nodes, ai.tt_lookups, ai.tt_hits, ai.tt_stores, ai.eval_lookups) == (
         0,
         0,
@@ -197,7 +197,7 @@ def test_dev_instrumentation_does_not_change_search(no_time_limit):
     instrumented = _armed()
     instrumented.dev = True
     instrumented.completed_any_depth = True
-    assert instrumented.alpha_beta(pos, 4, -inf, inf) == plain.alpha_beta(pos, 4, -inf, inf)
+    assert instrumented.alpha_beta(pos, 4, -INFINITY, INFINITY) == plain.alpha_beta(pos, 4, -INFINITY, INFINITY)
 
 
 # --------------------------------------------------------------------------- #

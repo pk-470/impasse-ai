@@ -13,10 +13,10 @@ import pytest
 
 from impasse.position import (
     BLACK,
-    LegacyState,
     INITIAL_STATE,
     WHITE,
     WIN_VALUE,
+    LegacyState,
     Position,
     _make_state_hash,
 )

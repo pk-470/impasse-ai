@@ -8,7 +8,7 @@ flat int-board rewrite keeps the board picklable and faithfully reconstructable.
 import pickle
 import random
 
-from impasse.position import _make_state_hash, Position
+from impasse.position import Position, _make_state_hash
 
 
 def _midgame(seed=3, plies=25):

@@ -6,6 +6,7 @@ int-board rewrite). Any change here means the optimization altered results.
 """
 
 from tests.golden_util import (
+    ordering_digest,
     search_results,
     search_values_legal_tied,
     trajectory_digest,
@@ -13,6 +14,10 @@ from tests.golden_util import (
 
 # Captured from the post-Phase-1 engine (the correct baseline).
 TRAJECTORY_DIGEST = "54e32c7aec118d002c3158dd0dd2711cc7a6fbabda9e0d3d440a20176c5b1f81"
+# Move ordering, which TRAJECTORY_DIGEST is blind to because it sorts. Verified
+# to be unchanged from the pre-mypyc-tuning engine, in both builds, before being
+# pinned here.
+ORDERING_DIGEST = "77671a37bb958cd34509f2e49598ffdcefd47b580c5c704ff2d90108b7fd28ea"
 SEARCH_RESULTS = (
     (0, 0, ((2, 6), (1, 5), "S")),
     (6, -10, ((7, 5), (4, 2), "S")),
@@ -26,6 +31,18 @@ def test_trajectory_digest_unchanged():
     digest, n = trajectory_digest()
     assert n == 4000
     assert digest == TRAJECTORY_DIGEST
+
+
+def test_move_ordering_unchanged():
+    """Generation and ordering must emit the same moves in the same order.
+
+    This is the one piece of behaviour the trajectory digest cannot check, and
+    it is what decides between equally-valued moves. A constant-factor change to
+    `ordered_moves` or to move generation must leave this untouched.
+    """
+    digest, n = ordering_digest()
+    assert n == 1200
+    assert digest == ORDERING_DIGEST
 
 
 def test_search_results_unchanged():

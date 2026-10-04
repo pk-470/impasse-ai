@@ -1,12 +1,12 @@
 import time
-from math import inf
-from typing import Callable, Optional, cast
+from collections.abc import Callable
+from typing import Final, cast
 
 from impasse.position import (
+    BLACK,
     COLOR_CODES,
     DIAG_RAYS,
     EMPTY,
-    MOVE_DIRECTIONS,
     OPPOSITE_COLOR,
     SINGLE_CODE,
     TURN_BIT,
@@ -16,32 +16,56 @@ from impasse.position import (
     Color,
     MoveTag,
     Position,
-    _index,
 )
 
-Move = tuple[Cell, Optional[Cell], MoveTag]
-TTEntry = tuple[float, Optional[Move], Optional[str], Optional[int]]
+Move = tuple[Cell, Cell | None, MoveTag]
 
+# DIAG_RAYS is keyed by (colour, checker type), so reading it per node hashes a
+# tuple that contains a tuple. These are its two rows the move ordering wants,
+# keyed by colour alone.
+DOUBLE_RAYS: Final[dict[Color, list[list[int]]]] = {
+    color: DIAG_RAYS[(color, 2)] for color in (WHITE, BLACK)
+}
+SINGLE_RAYS: Final[dict[Color, list[list[int]]]] = {
+    color: DIAG_RAYS[(color, 1)] for color in (WHITE, BLACK)
+}
+# A stored search result. Every field is always present -- a position that has
+# not been searched has no entry at all, rather than an entry full of Nones.
+TTEntry = tuple[int, Move | None, str, int]
+
+# Not Final, unlike the constants below: the tests and scripts/bench.py reassign
+# these to run the search to a fixed depth, and a compiled build folds a Final
+# into the code it generates, so marking them would make those patches silently
+# do nothing. The same goes for MAX_SEARCH_DEPTH, TT_MAX_ENTRIES and
+# EVAL_CACHE_MAX_ENTRIES.
 MIN_SEARCH_DEPTH = 5
 MILLISECONDS_PER_MOVE: float = 6000
 MAX_MILLISECONDS_PER_MOVE: float = 10000
 
 # Hard ceiling on iterative-deepening depth: a backstop so a cheaply-resolved position
-# cannot spin the depth counter through the whole move budget.
+# cannot spin the depth counter through the whole move budget. Not Final, for the
+# same reason as the budgets above -- a test lowers it to check the cap holds.
 MAX_SEARCH_DEPTH = 64
 # A search value of at least this magnitude marks a proven forced win/loss (it is well
 # above any reachable heuristic score). Deeper search cannot change such a result, so
 # iterative deepening stops as soon as one is found.
-MATE_THRESHOLD = WIN_VALUE // 2
+MATE_THRESHOLD: Final = WIN_VALUE // 2
+# The search works in integers throughout, because evaluate() does; this stands
+# in for the infinite initial window. Kept clear of WIN_VALUE so a proven win is
+# still strictly inside it. A float window would otherwise be the one thing
+# forcing the search values to be floats -- which, compiled, means boxing a
+# double into every transposition-table entry, and printing "56.0" where the
+# interpreted engine prints "56".
+INFINITY: Final = WIN_VALUE * 2
 
 # How often the search calls back into on_tick (in nodes), so a front end can stay
 # responsive without paying a callback per node.
-TICK_INTERVAL_NODES = 4096
+TICK_INTERVAL_NODES: Final = 4096
 # How often the move's time budget is checked (in nodes). time.time() plus the
 # conversion to milliseconds costs more than most of a node's remaining bookkeeping,
 # and checking it per node bought nothing: at the engine's node rate 512 nodes is a
 # few milliseconds of overshoot against a 6000 ms budget.
-TIME_CHECK_INTERVAL_NODES = 512
+TIME_CHECK_INTERVAL_NODES: Final = 512
 
 # Bound the transposition table and eval cache so they cannot grow without limit
 # across a long game; once full, the oldest entries are evicted first (FIFO).
@@ -90,14 +114,14 @@ class AI:
         self.eval_cache: dict[int, int] = {}
         # Killer moves (two per remaining-depth slot) and a table of cutoff counts,
         # both used only to order quiet moves.
-        self.killers: list[list[Optional[Move]]] = [
+        self.killers: list[list[Move | None]] = [
             [None, None] for _ in range(MAX_SEARCH_DEPTH + 2)
         ]
         self.history: dict[Move, int] = {}
         # Optional no-argument callback, invoked every TICK_INTERVAL_NODES nodes so a
         # front end can pump its event queue while the search runs. current_depth is
         # the iterative-deepening depth in progress, for the caller to display.
-        self.on_tick: Optional[Callable[[], None]] = None
+        self.on_tick: Callable[[], None] | None = None
         self.current_depth: int = 0
         self._tick_countdown: int = TICK_INTERVAL_NODES
         self._time_countdown: int = TIME_CHECK_INTERVAL_NODES
@@ -116,7 +140,7 @@ class AI:
 
     # Transposition table retrieval and storage
 
-    def tt_retrieve(self, position: Position) -> TTEntry:
+    def tt_retrieve(self, position: Position) -> TTEntry | None:
         """
         Look up a position's transposition-table entry.
 
@@ -124,8 +148,10 @@ class AI:
             position: The position to look up.
 
         Returns:
-            The stored (value, move, flag, depth) entry, or a (0.0, None, None,
-            None) sentinel whose None depth marks a miss.
+            The stored (value, move, flag, depth) entry, or None if the position
+            has not been searched. Returning the entry itself rather than a
+            filled-in sentinel keeps a miss -- the common case -- from building
+            a tuple only to be thrown away.
         """
         entry = self.transposition_table.get(
             position.state_hash * 2 + TURN_BIT[position.turn]
@@ -134,15 +160,13 @@ class AI:
             self.tt_lookups += 1
             if entry is not None:
                 self.tt_hits += 1
-        if entry is None:
-            return 0.0, None, None, None
         return entry
 
     def tt_store(
         self,
         position: Position,
-        value: float,
-        move: Optional[Move],
+        value: int,
+        move: Move | None,
         flag: str,
         depth: int,
     ) -> None:
@@ -168,8 +192,7 @@ class AI:
         if existing is not None:
             # Prefer the entry searched to the greater depth; on a tie the newer
             # result replaces the old one.
-            existing_depth = existing[3]
-            if existing_depth is not None and existing_depth > depth:
+            if existing[3] > depth:
                 return
         elif len(table) >= TT_MAX_ENTRIES:
             del table[next(iter(table))]
@@ -180,7 +203,7 @@ class AI:
     def ordered_moves(
         self,
         position: Position,
-        most_promising_move: Optional[Move] = None,
+        most_promising_move: Move | None = None,
         depth: int = 0,
     ) -> list[Move]:
         """
@@ -198,114 +221,131 @@ class AI:
             potential crownings, transposes, and finally the remaining slides, most
             cutoffs first (longest first until the history table has entries).
         """
-        check_first = []
-        killer_moves = []
+        check_first: list[Move] = []
+        killer_moves: list[Move] = []
         killer_1, killer_2 = self.killers[depth]
-        bear_offs = []
-        crownings = []
-        potential_crownings = []
-        transposes = []
-        slides_blocking_doubles_once = []
-        slides_blocking_doubles_twice = []
-        slides_blocking_singles_once = []
-        slides_blocking_singles_twice = []
-        other_slides = []
+        bear_offs: list[Move] = []
+        crownings: list[Move] = []
+        potential_crownings: list[Move] = []
+        transposes: list[Move] = []
+        slides_blocking_doubles_once: list[Move] = []
+        slides_blocking_doubles_twice: list[Move] = []
+        slides_blocking_singles_once: list[Move] = []
+        slides_blocking_singles_twice: list[Move] = []
+        other_slides: list[Move] = []
         state = position.state
-        enemy = OPPOSITE_COLOR[position.turn]
+        turn = position.turn
+        enemy = OPPOSITE_COLOR[turn]
         enemy_double = COLOR_CODES[enemy][1]
         enemy_single = SINGLE_CODE[enemy]
-        double_rays = DIAG_RAYS[(position.turn, 2)]
-        single_rays = DIAG_RAYS[(position.turn, 1)]
+        double_rays = DOUBLE_RAYS[turn]
+        single_rays = SINGLE_RAYS[turn]
+        # Most nodes have no transposition-table move; an identity test then
+        # replaces a tuple comparison per move.
+        seeded = most_promising_move is not None
         for move in position.moves_list:
-            origin, target, tag = move
-            if move == most_promising_move:
+            _, target, tag = move
+            if seeded and move == most_promising_move:
                 check_first = [move]
-            elif move == killer_1 or move == killer_2:
-                killer_moves.append(move)
+            # Slides and transposes are tested first because they are the bulk
+            # of a move list, and the killer slots can only hold one of those
+            # two (alpha_beta records a cutoff move only for tags "S" and "T"),
+            # so no other branch has to compare against them.
+            elif tag == "S":
+                if move == killer_1 or move == killer_2:
+                    killer_moves.append(move)
+                else:
+                    # A slide is ranked by whether its destination ends up next
+                    # to an enemy double (blocking it) and then an enemy single,
+                    # counting up to two blocks. Only the first occupied square
+                    # along each of the two diagonals matters.
+                    assert target is not None
+                    base = (target[0] * 8 + target[1]) * 2
+                    blocked_doubles = 0
+                    for idx in double_rays[base]:
+                        code = state[idx]
+                        if code != EMPTY:
+                            if code == enemy_double:
+                                blocked_doubles = 1
+                            break
+                    for idx in double_rays[base + 1]:
+                        code = state[idx]
+                        if code != EMPTY:
+                            if code == enemy_double:
+                                blocked_doubles += 1
+                            break
+                    if blocked_doubles == 2:
+                        slides_blocking_doubles_twice.append(move)
+                    elif blocked_doubles:
+                        slides_blocking_doubles_once.append(move)
+                    else:
+                        blocked_singles = 0
+                        for idx in single_rays[base]:
+                            code = state[idx]
+                            if code != EMPTY:
+                                if code == enemy_single:
+                                    blocked_singles = 1
+                                break
+                        for idx in single_rays[base + 1]:
+                            code = state[idx]
+                            if code != EMPTY:
+                                if code == enemy_single:
+                                    blocked_singles += 1
+                                break
+                        if blocked_singles == 2:
+                            slides_blocking_singles_twice.append(move)
+                        elif blocked_singles:
+                            slides_blocking_singles_once.append(move)
+                        else:
+                            other_slides.append(move)
+            elif tag == "T":
+                if move == killer_1 or move == killer_2:
+                    killer_moves.append(move)
+                else:
+                    transposes.append(move)
             elif tag == "C":
                 crownings.append(move)
-            elif tag in ("B", "SB", "TB"):
+            elif tag == "B" or tag == "SB" or tag == "TB":
                 bear_offs.append(move)
-            elif tag in ("SC", "TC"):
+            elif tag == "SC" or tag == "TC":
                 potential_crownings.append(move)
-            elif tag == "T":
-                transposes.append(move)
-            elif tag == "S":
-                # A slide is ranked by whether its destination ends up next to an
-                # enemy double (blocking it) and then an enemy single, counting up
-                # to two blocks. The first occupied square along each diagonal is
-                # the only one that matters.
-                assert target is not None
-                base = (target[0] * 8 + target[1]) * 2
-                blocks_double_once = False
-                blocks_double_twice = False
-                for d in (0, 1):
-                    for idx in double_rays[base + d]:
-                        code = state[idx]
-                        if code == EMPTY:
-                            continue
-                        if code == enemy_double:
-                            if blocks_double_once:
-                                blocks_double_twice = True
-                            else:
-                                blocks_double_once = True
-                        break
-                if blocks_double_twice:
-                    slides_blocking_doubles_twice.append(move)
-                elif blocks_double_once:
-                    slides_blocking_doubles_once.append(move)
-                else:
-                    blocks_single_once = False
-                    blocks_single_twice = False
-                    for d in (0, 1):
-                        for idx in single_rays[base + d]:
-                            code = state[idx]
-                            if code == EMPTY:
-                                continue
-                            if code == enemy_single:
-                                if blocks_single_once:
-                                    blocks_single_twice = True
-                                else:
-                                    blocks_single_once = True
-                            break
-                    if blocks_single_twice:
-                        slides_blocking_singles_twice.append(move)
-                    elif blocks_single_once:
-                        slides_blocking_singles_once.append(move)
-                    else:
-                        other_slides.append(move)
 
-        history = self.history
-        if history:
-            other_slides.sort(
-                reverse=True,
-                key=lambda m: (history.get(m, 0), abs(m[0][0] - cast(Cell, m[1])[0])),
-            )
-        else:
-            other_slides.sort(
-                reverse=True, key=lambda x: abs(x[0][0] - cast(Cell, x[1])[0])
-            )
-        return (
-            check_first
-            + killer_moves
-            + crownings
-            + bear_offs
-            + slides_blocking_doubles_twice
-            + slides_blocking_doubles_once
-            + slides_blocking_singles_twice
-            + slides_blocking_singles_once
-            + potential_crownings
-            + transposes
-            + other_slides
-        )
+        if len(other_slides) > 1:
+            history = self.history
+            if history:
+                other_slides.sort(
+                    reverse=True,
+                    key=lambda m: (
+                        history.get(m, 0),
+                        abs(m[0][0] - cast(Cell, m[1])[0]),
+                    ),
+                )
+            else:
+                other_slides.sort(
+                    reverse=True, key=lambda x: abs(x[0][0] - cast(Cell, x[1])[0])
+                )
+        # Extended into one list rather than chained with `+`, which allocated a
+        # fresh list per bucket and recopied everything ahead of it.
+        ordered = check_first
+        ordered.extend(killer_moves)
+        ordered.extend(crownings)
+        ordered.extend(bear_offs)
+        ordered.extend(slides_blocking_doubles_twice)
+        ordered.extend(slides_blocking_doubles_once)
+        ordered.extend(slides_blocking_singles_twice)
+        ordered.extend(slides_blocking_singles_once)
+        ordered.extend(potential_crownings)
+        ordered.extend(transposes)
+        ordered.extend(other_slides)
+        return ordered
 
     def alpha_beta(
         self,
         position: Position,
         depth: int,
-        alpha: float,
-        beta: float,
-    ) -> tuple[float, Optional[Move]]:
+        alpha: int,
+        beta: int,
+    ) -> tuple[int, Move | None]:
         """
         Search a position with alpha-beta to a fixed depth.
 
@@ -349,20 +389,23 @@ class AI:
         old_alpha, old_beta = alpha, beta
         # Search for the position in the transposition table. If the search depth in
         # the TT is larger than the current search depth, then trust the TT entry.
-        tt_value, tt_move, tt_flag, tt_depth = self.tt_retrieve(position)
-        if tt_depth is not None and tt_depth >= depth:
-            if tt_flag == "E":
-                if self.dev:
-                    self.tt_cutoffs += 1
-                return tt_value, tt_move
-            elif tt_flag == "L":
-                alpha = max(alpha, tt_value)
-            elif tt_flag == "U":
-                beta = min(beta, tt_value)
-            if alpha >= beta:
-                if self.dev:
-                    self.tt_cutoffs += 1
-                return tt_value, tt_move
+        tt_move: Move | None = None
+        entry = self.tt_retrieve(position)
+        if entry is not None:
+            tt_value, tt_move, tt_flag, tt_depth = entry
+            if tt_depth >= depth:
+                if tt_flag == "E":
+                    if self.dev:
+                        self.tt_cutoffs += 1
+                    return tt_value, tt_move
+                elif tt_flag == "L":
+                    alpha = max(alpha, tt_value)
+                elif tt_flag == "U":
+                    beta = min(beta, tt_value)
+                if alpha >= beta:
+                    if self.dev:
+                        self.tt_cutoffs += 1
+                    return tt_value, tt_move
 
         # Regular Alpha-Beta
         if position.winner or not depth:
@@ -383,10 +426,11 @@ class AI:
         # White maximises, Black minimises. Branching on the side to move once keeps
         # two Python-level closure calls per move out of the hot loop.
         maximising = position.turn == WHITE
-        value = -inf if maximising else inf
-        best_move: Optional[Move] = None
+        value = -INFINITY if maximising else INFINITY
+        best_move: Move | None = None
         # Check TT move first
-        for origin, target, tag in self.ordered_moves(position, tt_move, depth):
+        for move in self.ordered_moves(position, tt_move, depth):
+            origin, target, tag = move
             new_position = position.new_position_after_move(origin, target, tag)
             if new_position.turn == position.turn:
                 local_value, _ = self.alpha_beta(new_position, depth, alpha, beta)
@@ -395,16 +439,15 @@ class AI:
             if maximising:
                 if local_value > value:
                     value = local_value
-                    best_move = (origin, target, tag)
+                    best_move = move
                     alpha = max(alpha, value)
             elif local_value < value:
                 value = local_value
-                best_move = (origin, target, tag)
+                best_move = move
                 beta = min(beta, value)
             if alpha >= beta:
                 # Remember quiet moves that cut off, to try them earlier elsewhere.
                 if tag == "S" or tag == "T":
-                    move = (origin, target, tag)
                     slot = self.killers[depth]
                     if slot[0] != move:
                         slot[1] = slot[0]
@@ -423,9 +466,7 @@ class AI:
 
         return value, best_move
 
-    def iterative_deepening(
-        self, position: Position
-    ) -> tuple[int, float, Optional[Move]]:
+    def iterative_deepening(self, position: Position) -> tuple[int, int, Move | None]:
         """
         Search a position to increasing depths within the move's time budget.
 
@@ -452,8 +493,8 @@ class AI:
         # Seed with a safe fallback so a timeout before any depth completes still
         # returns a value (the depth-1 search is guaranteed to complete, however).
         prev_search_depth: int = 0
-        prev_value: float = float(position.evaluate())
-        prev_best_move: Optional[Move] = None
+        prev_value: int = position.evaluate()
+        prev_best_move: Move | None = None
         while True:
             self.current_depth = search_depth
             if search_depth > MIN_SEARCH_DEPTH:
@@ -462,8 +503,8 @@ class AI:
                 value, best_move = self.alpha_beta(
                     position,
                     search_depth,
-                    -inf,
-                    inf,
+                    -INFINITY,
+                    INFINITY,
                 )
             except ABTimeOut:
                 break
@@ -511,7 +552,7 @@ class AI:
 
     def suggested_move(
         self, position: Position
-    ) -> tuple[Optional[Cell], Optional[Cell], Optional[MoveTag], bool]:
+    ) -> tuple[Cell | None, Cell | None, MoveTag | None, bool]:
         """
         Choose the best move for the player to move and print its evaluation.
 

@@ -20,9 +20,9 @@ uv sync
 
 ### Optional: a stronger AI
 
-Compiling the search engine to C extensions roughly doubles its speed, letting
-it search about a ply deeper in the same thinking time. Needs a C compiler
-(MSVC on Windows, gcc or clang elsewhere).
+Compiling the search engine to C extensions makes it about four times faster,
+letting it search one to two plies deeper in the same thinking time. Needs a C
+compiler (MSVC on Windows, gcc or clang elsewhere).
 
 ```bash
 uv run python scripts/build_native.py           # compile
