@@ -14,7 +14,7 @@ import sys
 import time
 
 import impasse.ai as ai_mod
-from impasse.ai import AI
+from impasse.ai import AI, INFINITY
 from impasse.position import WHITE, Position
 
 if not ai_mod.__file__.endswith(".py"):
@@ -71,7 +71,7 @@ def midgame_position(plies):
     for _ in range(plies):
         if pos.winner:
             break
-        _, mv = ai.alpha_beta(pos, 3, float("-inf"), float("inf"))
+        _, mv = ai.alpha_beta(pos, 3, -INFINITY, INFINITY)
         if mv is None:
             break
         pos = pos.new_position_after_move(*mv)
@@ -86,7 +86,7 @@ def bench(label, pos, depths):
         EVALS = 0
         ai = fresh_ai()
         t0 = time.perf_counter()
-        val, mv = ai.alpha_beta(pos, d, float("-inf"), float("inf"))
+        val, _ = ai.alpha_beta(pos, d, -INFINITY, INFINITY)
         dt = time.perf_counter() - t0
         nps = NODES / dt if dt else 0
         print(
@@ -109,7 +109,7 @@ if __name__ == "__main__":
     ai = fresh_ai()
     pr = cProfile.Profile()
     pr.enable()
-    ai.alpha_beta(open_pos, 5, float("-inf"), float("inf"))
+    ai.alpha_beta(open_pos, 5, -INFINITY, INFINITY)
     pr.disable()
     s = io.StringIO()
     ps = pstats.Stats(pr, stream=s).sort_stats("tottime")

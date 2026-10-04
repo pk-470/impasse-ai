@@ -19,6 +19,7 @@ from impasse.position import (
     HOME_INDICES,
     HOME_MASK,
     WHITE,
+    Move,
     Position,
     _eval_paths_native,
     _eval_paths_pure,
@@ -35,7 +36,7 @@ def _selfplay_positions(count, seed=12345):
             pos = Position()
             continue
         out.append(pos)
-        moves = [
+        moves: list[Move] = [
             (origin, target, tag)
             for origin, targets in pos.all_legal_moves.items()
             for target, tag in targets.items()

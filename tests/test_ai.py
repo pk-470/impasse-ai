@@ -101,9 +101,16 @@ def test_iterative_deepening_survives_immediate_timeout(monkeypatch):
     must still return a legal move rather than raising UnboundLocalError."""
     monkeypatch.setattr(ai_mod, "MAX_MILLISECONDS_PER_MOVE", -1)
     pos = Position()
-    depth, value, best_move = AI(WHITE).iterative_deepening(pos)
+    _, _, best_move = AI(WHITE).iterative_deepening(pos)
     assert best_move is not None
     assert _legal(pos, best_move)
+
+
+def _tt_value(ai, pos):
+    """The stored value for a position, asserting there is an entry at all."""
+    entry = ai.tt_retrieve(pos)
+    assert entry is not None
+    return entry[0]
 
 
 def test_tt_depth_preferred_replacement_keeps_deeper_entry():
@@ -112,11 +119,11 @@ def test_tt_depth_preferred_replacement_keeps_deeper_entry():
     pos = Position()
     ai.tt_store(pos, 5, None, "E", 2)
     ai.tt_store(pos, 7, None, "E", 6)
-    assert ai.tt_retrieve(pos)[0] == 7  # deeper result kept
+    assert _tt_value(ai, pos) == 7  # deeper result kept
     ai.tt_store(pos, 9, None, "E", 3)  # shallower must not displace it
-    assert ai.tt_retrieve(pos)[0] == 7
+    assert _tt_value(ai, pos) == 7
     ai.tt_store(pos, 11, None, "E", 6)  # equal-or-deeper replaces
-    assert ai.tt_retrieve(pos)[0] == 11
+    assert _tt_value(ai, pos) == 11
 
 
 def test_tt_and_eval_cache_eviction_is_bounded_and_sound(no_time_limit, monkeypatch):
@@ -228,7 +235,7 @@ def test_iterative_deepening_respects_depth_cap(no_time_limit, monkeypatch):
     """When no forced result is yet in reach, the depth cap bounds the search rather
     than letting a cheaply-resolved position run away."""
     monkeypatch.setattr(ai_mod, "MAX_SEARCH_DEPTH", 8)
-    depth, value, move = AI(WHITE).iterative_deepening(_forced_result_position())
+    depth, _, move = AI(WHITE).iterative_deepening(_forced_result_position())
     assert depth == 8, "the cap (mate is deeper than 8 here) is what stops the search"
     assert move is not None
 

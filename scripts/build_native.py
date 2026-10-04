@@ -165,8 +165,8 @@ def check() -> int:
         "from impasse.position import NATIVE;"
         "print('pathfinders:', 'native (mypyc)' if NATIVE else 'pure Python')"
     )
-    subprocess.run([sys.executable, "-c", probe])
-    return 0
+    # A probe that cannot import the extension means the build is unusable.
+    return 1 if subprocess.run([sys.executable, "-c", probe], check=False).returncode else 0
 
 
 def build() -> int:
@@ -175,10 +175,16 @@ def build() -> int:
     # mypyc type-checks as part of compiling, but a plain mypy run first gives
     # readable errors instead of a compile abort.
     print(f"type-checking {' '.join(MODULES)} ...", flush=True)
-    if subprocess.run([sys.executable, "-m", "mypy", *MODULES], cwd=SRC).returncode:
+    mypy = subprocess.run(
+        [sys.executable, "-m", "mypy", *MODULES], cwd=SRC, check=False
+    )
+    if mypy.returncode:
         return 1
     print("compiling with mypyc ...", flush=True)
-    if subprocess.run([sys.executable, "-m", "mypyc", *MODULES], cwd=SRC).returncode:
+    mypyc = subprocess.run(
+        [sys.executable, "-m", "mypyc", *MODULES], cwd=SRC, check=False
+    )
+    if mypyc.returncode:
         return 1
     STAMP.write_text(json.dumps(source_digests(), indent=2))
     print()
@@ -186,7 +192,7 @@ def build() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--clean", action="store_true", help="remove the extensions")
     group.add_argument("--check", action="store_true", help="report what is in place")

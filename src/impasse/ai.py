@@ -20,6 +20,29 @@ from impasse.position import (
 
 Move = tuple[Cell, Cell | None, MoveTag]
 
+# Only this module's own names. Without it, `from impasse.ai import *` in the
+# package __init__ also re-exports the constants ai.py imports from position.py,
+# rebinding names that are Final there.
+__all__ = [
+    "AI",
+    "DOUBLE_RAYS",
+    "EVAL_CACHE_MAX_ENTRIES",
+    "INFINITY",
+    "MATE_THRESHOLD",
+    "MAX_MILLISECONDS_PER_MOVE",
+    "MAX_SEARCH_DEPTH",
+    "MILLISECONDS_PER_MOVE",
+    "MIN_SEARCH_DEPTH",
+    "SINGLE_RAYS",
+    "TICK_INTERVAL_NODES",
+    "TIME_CHECK_INTERVAL_NODES",
+    "TT_MAX_ENTRIES",
+    "ABTimeOut",
+    "Move",
+    "TTEntry",
+    "milliseconds",
+]
+
 # The two DIAG_RAYS rows the move ordering wants, keyed by colour alone.
 DOUBLE_RAYS: Final[dict[Color, list[list[int]]]] = {
     color: DIAG_RAYS[(color, 2)] for color in (WHITE, BLACK)
