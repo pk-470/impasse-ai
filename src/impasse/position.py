@@ -16,8 +16,7 @@ type MoveTag = Literal["S", "SB", "SC", "T", "TB", "TC", "C", "B"]
 type MoveDestination = Cell | None
 type MoveDict = dict[MoveDestination, MoveTag]
 type LegalMoves = dict[Cell, MoveDict]
-# A single move as the search handles it: where from, where to (None for a bear
-# off) and what kind. This is the primary form move generation produces.
+# A single move: where from, where to (None for a bear off) and what kind.
 type Move = tuple[Cell, MoveDestination, MoveTag]
 
 WHITE: Final[Color] = (255, 255, 255)
@@ -49,8 +48,7 @@ PIECE_TO_CODE: Final[dict[Piece | None, int]] = {
     (BLACK, 2): 4,
 }
 CODE_TO_PIECE: Final[dict[int, Piece | None]] = {c: p for p, c in PIECE_TO_CODE.items()}
-# Checker type (1 single, 2 crown) per square code, as a table indexed by the
-# code rather than a dict keyed by it. Index 0 (empty) has no type.
+# Checker type per square code: 1 single, 2 crown, index 0 (empty) no type.
 CODE_TYPE: Final[bytes] = bytes((0, 1, 2, 1, 2))
 SINGLE_CODE: Final[dict[Color, int]] = {WHITE: 1, BLACK: 3}
 COLOR_CODES: Final[dict[Color, tuple[int, int]]] = {WHITE: (1, 2), BLACK: (3, 4)}
@@ -64,11 +62,8 @@ def _index(cell: Cell) -> int:
 # The 32 dark squares in board order, and their flat indices.
 DARK_CELLS: Final[list[Cell]] = list(INITIAL_STATE)
 DARK_INDICES: Final[list[int]] = [_index(cell) for cell in DARK_CELLS]
-# The inverse of _index, so a scan over DARK_INDICES can name the cell it is on
-# without the arithmetic. Cells are compared and hashed by value everywhere (and
-# never with `is` -- they cross pickle boundaries, and compiled, mypyc re-boxes a
-# tuple on its way into a list, so even DARK_CELLS and SLIDE_RAYS do not share
-# objects there), so only the values here matter.
+# The inverse of _index. Cells are compared by value and never with `is`: they
+# cross pickle boundaries, and compiled these share no objects with DARK_CELLS.
 CELL_AT_INDEX: Final[list[Cell]] = [(idx // 8, idx % 8) for idx in range(64)]
 for _cell in DARK_CELLS:
     CELL_AT_INDEX[_index(_cell)] = _cell
@@ -124,17 +119,13 @@ DIAGONALS: Final[dict[tuple[Cell, Cell], list[Cell]]] = {
     for checker in MOVE_DIRECTIONS
     for d in MOVE_DIRECTIONS[checker]
 }
-# Same diagonals expressed as flat indices, keyed by (origin index, direction), for
-# the hot evaluation pathfinders.
+# The same diagonals as flat indices, keyed by (origin index, direction).
 DIAG_INDICES: Final[dict[tuple[int, Cell], list[int]]] = {
     (_index(cell), d): [_index(c) for c in cells]
     for (cell, d), cells in DIAGONALS.items()
 }
-# The same flat diagonals indexed by [origin index * 2 + direction-choice] for each
-# colour and checker type, so move generation and move ordering index a list by a
-# small int instead of building a (cell, direction) tuple and hashing it. Indexing a
-# list beats hashing a tuple in bytecode and compiles to a load, so unlike the
-# pathfinders' native forms this needs no NATIVE branch.
+# The same flat diagonals indexed by [origin index * 2 + direction choice], for
+# move generation and move ordering.
 DIAG_RAYS: Final[dict[Piece, list[list[int]]]] = {
     piece: [
         DIAG_INDICES.get((anchor, MOVE_DIRECTIONS[piece][i]), [])
@@ -143,8 +134,8 @@ DIAG_RAYS: Final[dict[Piece, list[list[int]]]] = {
     ]
     for piece in MOVE_DIRECTIONS
 }
-# Slide generation needs the destination cell (the move dicts are keyed by cell) as
-# well as its index, so it reads (cell, index) pairs and never calls _index.
+# As (cell, index) pairs: a move tuple names its destination cell, so slide
+# generation never calls _index.
 SLIDE_RAYS: Final[dict[int, list[list[tuple[Cell, int]]]]] = {
     PIECE_TO_CODE[piece]: [
         [
@@ -156,21 +147,19 @@ SLIDE_RAYS: Final[dict[int, list[list[tuple[Cell, int]]]]] = {
     ]
     for piece in MOVE_DIRECTIONS
 }
-# Home rows as 64-byte 0/1 tables, so a membership test is one indexed byte read
-# instead of a frozenset hash. Fast in both builds, unlike HOME_MASK.
+# Home rows as 64-byte 0/1 tables, so a membership test is one byte read. Fast in
+# both builds, unlike HOME_MASK.
 HOME_TABLE: Final[dict[Color, bytes]] = {
     color: bytes(1 if idx in indices else 0 for idx in range(64))
     for color, indices in HOME_INDICES.items()
 }
-# Side-to-move as a bit, for composing a single-int transposition-table key.
-# Keyed by value, not identity: an unpickled turn colour is an equal but distinct
-# tuple (gui.py's undo path assigns one), so `turn is WHITE` would be wrong there.
+# Side to move as a bit, for a single-int transposition-table key. Keyed by value,
+# not identity: an unpickled colour is an equal but distinct tuple (gui.py's undo
+# path assigns one), so `turn is WHITE` would be wrong there.
 TURN_BIT: Final[dict[Color, int]] = {WHITE: 0, BLACK: 1}
-# The same flat diagonals indexed directly by [anchor][direction-choice 0/1] for each
-# colour, so the hot pathfinders avoid building a tuple key and hashing it on every
-# recursive step. BEAR_DIAGS follows a double's two move directions, CROWN_DIAGS a
-# single's. Diagonal moves keep a piece on dark squares, so only dark anchors are ever
-# read; light anchors map to an empty list.
+# The same flat diagonals indexed by [anchor][direction choice], for the
+# pathfinders. BEAR_DIAGS follows a double's move directions, CROWN_DIAGS a
+# single's; only dark anchors are ever read, and light ones map to an empty list.
 BEAR_DIAGS: Final[dict[Color, list[list[list[int]]]]] = {
     color: [
         [DIAG_INDICES.get((anchor, MOVE_DIRECTIONS[(color, 2)][i]), []) for i in (0, 1)]
@@ -186,17 +175,13 @@ CROWN_DIAGS: Final[dict[Color, list[list[list[int]]]]] = {
     for color in (WHITE, BLACK)
 }
 
-# True when this module was compiled by mypyc (its __file__ is then the extension,
-# not the source). The pathfinders exist in two flavours and this picks between
-# them: see _bear_off_walk_pure / _bear_off_walk_native below. Derived rather than
-# configured, so a compiled build and its flag can never disagree.
+# True when mypyc compiled this module, derived from __file__ so a build and its
+# flag cannot disagree. It picks between the _pure and _native flavours of the
+# pathfinders and the evaluation pass, which must stay behaviour-identical (see
+# test_dual.py). Both sets of tables below are built either way.
 NATIVE: Final[bool] = not __file__.endswith((".py", ".pyc"))
 
-# Native-flavour lookups. A home row becomes a 64-bit occupancy bitmask (one
-# shift+test rather than a frozenset hash), and the diagonals are flattened to one
-# `bytes` ray per (anchor, direction) at index anchor * 2 + i, so a leg reads a
-# native byte instead of indexing a list of lists of boxed ints. Both forms are
-# built either way; the unused one costs a few KB and no time.
+
 def _signed64(mask: int) -> int:
     """Reinterpret a 64-bit mask as a signed two's-complement int.
 
@@ -210,12 +195,7 @@ HOME_MASK: Final[dict[Color, int]] = {
     color: _signed64(sum(1 << idx for idx in indices))
     for color, indices in HOME_INDICES.items()
 }
-# Every (anchor, direction) slot, numbered anchor * 2 + direction, gets a fixed
-# RAY_STRIDE-byte span of this table holding its squares in order and then
-# RAY_END. A diagonal is at most 7 squares long, so a span always has room for
-# the sentinel. One flat `bytes` rather than a list of 128 of them: a walker
-# step is then a single byte read, with no list index, no len() call, and no
-# per-leg object for the caller to pass and the callee to release.
+# Fixed-stride spans, one per (anchor, direction) slot, each ending in RAY_END.
 RAY_STRIDE: Final = 8
 RAY_END: Final = 255
 
@@ -247,9 +227,8 @@ CROWN_RAYS: Final[dict[Color, bytes]] = {
     color: _flat_rays(diags) for color, diags in CROWN_DIAGS.items()
 }
 
-# The same tables split per colour. The fused evaluation loop below walks every
-# piece of both colours, so it reads these globals instead of hashing a Color on
-# each one; the dicts above stay for callers that have a colour in hand.
+# The same tables split per colour: the fused evaluation loop below walks both
+# colours and so has no Color in hand to key the dicts with.
 BEAR_DIAGS_WHITE: Final = BEAR_DIAGS[WHITE]
 BEAR_DIAGS_BLACK: Final = BEAR_DIAGS[BLACK]
 CROWN_DIAGS_WHITE: Final = CROWN_DIAGS[WHITE]
@@ -262,8 +241,7 @@ CROWN_RAYS_WHITE: Final = CROWN_RAYS[WHITE]
 CROWN_RAYS_BLACK: Final = CROWN_RAYS[BLACK]
 HOME_MASK_WHITE: Final = HOME_MASK[WHITE]
 HOME_MASK_BLACK: Final = HOME_MASK[BLACK]
-# The dark squares as a `bytes` table, so the native evaluation loop reads each
-# index as a native int rather than unboxing a list element.
+# The dark squares as `bytes`, for the native evaluation loop.
 DARK_BYTES: Final = bytes(DARK_INDICES)
 
 # Sentinel "no path found" score, below any score a real path can reach.
@@ -281,20 +259,15 @@ CHECKERS_COUNT_WEIGHT: Final = 120
 DOUBLES_PATHS_WEIGHT: Final = 8
 SINGLES_PATHS_WEIGHT: Final = 2
 DOUBLES_WEIGHT: Final = 1
-# Score of a decided position. Kept far above any reachable heuristic score so that a
-# real win/loss always outranks a heuristic line and can be detected as terminal.
+# Score of a decided position, far above any reachable heuristic score so a real
+# win always outranks a heuristic line and can be detected as terminal.
 WIN_VALUE: Final = 100_000
 
 
-# Zobrist hashing: a random id for each (square index, code) combination, used to
-# hash board states for the transposition table. Stored as a 2D list indexed by
-# [square index][code] so the hot path indexes twice instead of hashing a tuple key.
-#
-# 61 bits, not 64: compiled, an int that fits in a tagged-pointer immediate is
-# machine arithmetic, while a wider one is a heap PyLong, and every applied move
-# XORs the hash four times and then derives the transposition-table key from it
-# (state_hash * 2 + turn bit, which stays inside the immediate range too). The
-# birthday collision chance over a full transposition table is still ~1e-6.
+# Zobrist hashing: a random id per (square index, code), as a 2D list the hot path
+# indexes twice rather than a dict keyed by a tuple. 61 bits, not 64, so the hash
+# and the transposition-table key derived from it both stay inside mypyc's
+# tagged-pointer immediate range -- see IMPROVEMENTS.md for the measured cliff.
 ZOBRIST_BITS: Final = 61
 random.seed(42)
 rand_ids: Final[list[list[int]]] = [[0] * 5 for _ in range(64)]
@@ -378,8 +351,7 @@ def _bear_off_walk_pure(
     for idx in diags[anchor][i]:
         piece = state[idx]
         if piece == EMPTY:
-            # A step is added if we move from a single
-            # to an empty cell
+            # Stepping from a single onto an empty cell costs a step.
             if not prev_empty:
                 steps += 1
                 prev_empty = True
@@ -387,9 +359,8 @@ def _bear_off_walk_pure(
             # Add one step before changing direction
             new_steps = steps + 1
         elif piece == single:
-            # A step is added if we encounter a single cell
-            # unless it is after changing direction at an empty
-            # cell (since then we have already added a step)
+            # Landing on a single costs a step, unless changing direction at an
+            # empty cell has already paid for it.
             if not (changed_dir and prev_empty):
                 steps += 1
             changed_dir = False
@@ -399,14 +370,13 @@ def _bear_off_walk_pure(
         else:
             break
 
-        # Keep the shortest path to bear off found so far for this double
-        # (converted into a score out of DOUBLES_PATHS_MAX)
+        # Keep the shortest bear-off path found, scored out of DOUBLES_PATHS_MAX.
         if idx in home and DOUBLES_PATHS_MAX - steps > best:
             best = DOUBLES_PATHS_MAX - steps
             break
 
-        # Change direction. Steps only grow, so DOUBLES_PATHS_MAX - new_steps bounds
-        # this leg: one that cannot beat `best` is dead and cutting it changes nothing.
+        # Steps only grow, so a leg that cannot beat `best` is dead; cutting it
+        # changes nothing.
         if DOUBLES_PATHS_MAX - new_steps > best:
             best = _bear_off_walk_pure(
                 state,
@@ -455,8 +425,7 @@ def _crown_walk_pure(
         if state[idx] != EMPTY:
             break
 
-        # Keep the shortest path to a crowning square found so far for this single
-        # (converted into a score out of SINGLES_PATHS_MAX)
+        # Keep the shortest path to a crowning square, scored out of SINGLES_PATHS_MAX.
         if idx in home and SINGLES_PATHS_MAX - steps > best:
             best = SINGLES_PATHS_MAX - steps
 
@@ -513,8 +482,7 @@ def _bear_off_walk_native(
         piece: i64 = board[idx]
         new_steps: i64 = 0
         if piece == 0:
-            # A step is added if we move from a single
-            # to an empty cell
+            # Stepping from a single onto an empty cell costs a step.
             if not prev_empty:
                 steps += 1
                 prev_empty = True
@@ -522,9 +490,8 @@ def _bear_off_walk_native(
             # Add one step before changing direction
             new_steps = steps + 1
         elif piece == single:
-            # A step is added if we encounter a single cell
-            # unless it is after changing direction at an empty
-            # cell (since then we have already added a step)
+            # Landing on a single costs a step, unless changing direction at an
+            # empty cell has already paid for it.
             if not (changed_dir and prev_empty):
                 steps += 1
             changed_dir = False
@@ -534,14 +501,13 @@ def _bear_off_walk_native(
         else:
             break
 
-        # Keep the shortest path to bear off found so far for this double
-        # (converted into a score out of DOUBLES_PATHS_MAX)
+        # Keep the shortest bear-off path found, scored out of DOUBLES_PATHS_MAX.
         if (home >> idx) & 1 and DOUBLES_PATHS_MAX - steps > best:
             best = DOUBLES_PATHS_MAX - steps
             break
 
-        # Change direction. Steps only grow, so DOUBLES_PATHS_MAX - new_steps bounds
-        # this leg: one that cannot beat `best` is dead and cutting it changes nothing.
+        # Steps only grow, so a leg that cannot beat `best` is dead; cutting it
+        # changes nothing.
         if DOUBLES_PATHS_MAX - new_steps > best:
             best = _bear_off_walk_native(
                 board,
@@ -592,8 +558,7 @@ def _crown_walk_native(
         if board[idx] != 0:
             break
 
-        # Keep the shortest path to a crowning square found so far for this single
-        # (converted into a score out of SINGLES_PATHS_MAX)
+        # Keep the shortest path to a crowning square, scored out of SINGLES_PATHS_MAX.
         if (home >> idx) & 1 and SINGLES_PATHS_MAX - steps > best:
             best = SINGLES_PATHS_MAX - steps
 
@@ -826,24 +791,18 @@ class Position:
     and to calculate the effect of a move on a position.
     """
 
-    # Declared here rather than in a single constructor path: there are two
-    # (make_position and the clone fast path), and mypyc lays out the native
-    # instance struct from these.
+    # Declared here because there are two constructor paths (make_position and the
+    # clone fast path), and mypyc lays out the native instance struct from these.
     state: State
     turn: Color
-    # Checker counts as two plain fields rather than a dict keyed by colour: the
-    # search copies them on every node and reads them in every evaluation, where
-    # a dict costs an allocation per copy and a tuple hash per read. The dict
-    # form stays available through the checkers_total property below, which is
-    # what the GUI, the save file and the tests use.
+    # Two plain fields rather than a dict keyed by colour, which cost an allocation
+    # on every node's clone. The dict form stays available as checkers_total below.
     checkers_white: int
     checkers_black: int
     winner: Color | None
     state_hash: int
-    # Legal moves are generated lazily on first access: most search nodes are
-    # eval-only leaves that never need them. None means "not yet computed".
-    # _moves_list is the primary form; _all_legal_moves is derived from it and
-    # only built when something outside the search asks for it.
+    # Generated lazily (None means "not yet computed"): most nodes are eval-only
+    # leaves. _moves_list is primary, _all_legal_moves is derived from it.
     _moves_list: list[Move] | None
     _all_legal_moves: LegalMoves | None
 
@@ -857,9 +816,8 @@ class Position:
         state_hash: int | None = None,
         clone_of: Position | None = None,
     ):
-        # Fast path for copy(): every field is known, so skip make_position's
-        # ladder of "derive this if it was not given" conditionals. One branch here
-        # replaces about eight there, on a path the search takes once per node.
+        # Fast path for copy(): every field is known, so skip make_position's ladder
+        # of "derive this if it was not given" conditionals.
         if clone_of is not None:
             self.state = clone_of.state.copy()
             self.turn = clone_of.turn
@@ -983,8 +941,7 @@ class Position:
             A new Position equal to this one in board, turn, checker counts,
             winner, legal moves and hash, sharing no mutable state with it.
         """
-        # Legal moves are left unset on purpose: new_position_after_move re-derives
-        # them, and most clones are eval-only leaves that never need them.
+        # Legal moves are left unset: most clones are leaves that never need them.
         return Position(clone_of=self)
 
     # Some shortcuts for various checks
@@ -1154,9 +1111,8 @@ class Position:
         single = SINGLE_CODE[self.turn]
         state = self.state
         far_row = HOME_ROW[OPPOSITE_COLOR[self.turn]]
-        # Cheap rejection first: no mover's single on the far row means no crowning
-        # is owed. This runs after most move applications, so it must not pay for
-        # the full board scan below (four reads instead of thirty-two).
+        # Cheap rejection first: no mover's single on the far row means none is owed.
+        # This runs after most move applications, so four reads instead of thirty-two.
         owed = False
         for target in far_row:
             if state[target[0] * 8 + target[1]] == single:
@@ -1166,8 +1122,7 @@ class Position:
             return []
 
         out: list[Move] = []
-        # One helper can crown more than one far-row single, so every origin keeps
-        # all of its targets.
+        # One helper can crown several far-row singles, so an origin keeps every one.
         for cell in DARK_CELLS:
             if state[cell[0] * 8 + cell[1]] != single:
                 continue
@@ -1205,9 +1160,8 @@ class Position:
         state = self.state
         turn_home = HOME_TABLE[turn]
         far_home = HOME_TABLE[OPPOSITE_COLOR[turn]]
-        # Scanned by index, with the cell read off CELL_AT_INDEX only for the
-        # mover's own squares: the two tests that find those are what every one
-        # of the 32 squares pays for.
+        # Scanned by index, with the cell read off CELL_AT_INDEX only for the mover's
+        # own squares; the two tests that find those are all 32 squares pay for.
         for idx in DARK_INDICES:
             code = state[idx]
             if code == single:
@@ -1216,8 +1170,7 @@ class Position:
                     CELL_AT_INDEX[idx], idx, code, turn_home, far_home, out
                 )
             elif code == double:
-                # Crowns transpose as well as slide; transposes come first, as
-                # they did when this merged two dicts.
+                # Crowns transpose as well as slide, transposes first.
                 cell = CELL_AT_INDEX[idx]
                 self._append_transposes(
                     cell, idx, code, single, turn_home, far_home, out
@@ -1411,8 +1364,8 @@ class Position:
             self._bear_off_one()
             # Might make crowning possible
             self.check_for_crownings_and_change_turn()
-        # Transpose + Bear off. Leaves a new single on the origin square, which is the
-        # rules' "come to have another on-board single" crowning trigger.
+        # Transpose + Bear off. The new single left on the origin is the rules'
+        # "come to have another on-board single" crowning trigger.
         elif tag == "TB":
             self._bear_off_one()
             self.check_for_crownings_and_change_turn()
@@ -1461,11 +1414,8 @@ class Position:
         """
         if self.winner is not None:
             return WIN_VALUE if self.winner == WHITE else -WIN_VALUE
-        # One pass over the board scores every piece of both colours. The native
-        # flavour reads a `bytes` snapshot: taking it costs ~0.2 us, and the
-        # walkers it drives read the board hundreds of times per evaluation,
-        # where a `bytes` index is a native byte read and a `list[int]` index
-        # has to unbox an object.
+        # One pass scores every piece of both colours. The native flavour pays for a
+        # `bytes` snapshot once, then every square read it drives is a native read.
         if NATIVE:
             doubles_path_score, singles_path_score, doubles_count = _eval_paths_native(
                 bytes(self.state)
