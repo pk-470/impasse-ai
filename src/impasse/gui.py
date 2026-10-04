@@ -1,3 +1,7 @@
+"""
+Pygame front end: board rendering, input handling and the recovery file.
+"""
+
 import pickle
 from functools import cache
 from pathlib import Path
@@ -16,7 +20,6 @@ from impasse.position import (
     MoveTag,
     Position,
     _make_state_hash,
-    _to_flat,
 )
 
 
@@ -162,9 +165,8 @@ class GUI(Position):
         """Restore the game state from the recovery file."""
         with open(save_file_path(), "rb") as file:
             position_data = pickle.load(file)
-        # _to_flat accepts both the current flat board and a legacy dict board from
-        # an older recovery file; the hash is recomputed to stay consistent with it.
-        self.state = _to_flat(position_data["state"])
+        # The hash is not stored, so recompute it from the restored board.
+        self.state = position_data["state"]
         self.state_hash = _make_state_hash(self.state)
         self.turn = position_data["turn"]
         self.all_legal_moves = position_data["all_legal_moves"]

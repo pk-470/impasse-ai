@@ -6,10 +6,18 @@ Invariants guard the search; the bug-fix tests are red on the unfixed engine.
 from math import inf
 
 import pytest
+from boards import make_board
 
 import impasse.ai as ai_mod
 from impasse.ai import AI, INFINITY
-from impasse.position import BLACK, INITIAL_STATE, WHITE, LegacyState, Position
+from impasse.position import (
+    BLACK,
+    INITIAL_STATE,
+    WHITE,
+    Cell,
+    Piece,
+    Position,
+)
 
 
 def _armed(color=WHITE) -> AI:
@@ -85,10 +93,10 @@ def test_warm_caches_are_populated_and_consistent(no_time_limit):
 def test_suggested_move_single_legal_move_no_crash():
     """Bug #2: a position with exactly one legal move returns it (unique_move=True)
     via the fast path instead of raising UnboundLocalError."""
-    state: LegacyState = {cell: None for cell in INITIAL_STATE}
+    state: dict[Cell, Piece | None] = {}
     state[(7, 7)] = (WHITE, 1)  # impasse -> single forced bear-off
     state[(0, 6)] = (BLACK, 1)
-    pos = Position(state=state, turn=WHITE)
+    pos = Position(state=make_board(state), turn=WHITE)
     assert pos.all_legal_moves == {(7, 7): {None: "B"}}
 
     origin, target, tag, unique = AI(WHITE).suggested_move(pos)
@@ -152,12 +160,18 @@ def test_tt_key_distinguishes_side_to_move(no_time_limit):
     ai = _armed()
     ai.completed_any_depth = True
     # Prime the TT with a White-to-move search of the opening.
-    ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=WHITE), 3, -INFINITY, INFINITY)
-    primed = ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -INFINITY, INFINITY)
+    ai.alpha_beta(
+        Position(state=INITIAL_STATE.copy(), turn=WHITE), 3, -INFINITY, INFINITY
+    )
+    primed = ai.alpha_beta(
+        Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -INFINITY, INFINITY
+    )
 
     fresh_ai = _armed()
     fresh_ai.completed_any_depth = True
-    fresh = fresh_ai.alpha_beta(Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -INFINITY, INFINITY)
+    fresh = fresh_ai.alpha_beta(
+        Position(state=INITIAL_STATE.copy(), turn=BLACK), 2, -INFINITY, INFINITY
+    )
 
     assert primed == fresh, "TT primed for the other side must not change the result"
 
@@ -204,7 +218,9 @@ def test_dev_instrumentation_does_not_change_search(no_time_limit):
     instrumented = _armed()
     instrumented.dev = True
     instrumented.completed_any_depth = True
-    assert instrumented.alpha_beta(pos, 4, -INFINITY, INFINITY) == plain.alpha_beta(pos, 4, -INFINITY, INFINITY)
+    assert instrumented.alpha_beta(pos, 4, -INFINITY, INFINITY) == plain.alpha_beta(
+        pos, 4, -INFINITY, INFINITY
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -214,19 +230,21 @@ def test_dev_instrumentation_does_not_change_search(no_time_limit):
 
 def _forced_result_position() -> Position:
     """A sparse position whose game tree resolves to a forced win/loss for White."""
-    state: LegacyState = {cell: None for cell in INITIAL_STATE}
+    state: dict[Cell, Piece | None] = {}
     state[(0, 0)] = (WHITE, 1)
     state[(2, 0)] = (WHITE, 2)
     state[(7, 7)] = (BLACK, 1)
     state[(5, 7)] = (BLACK, 2)
-    return Position(state=state, turn=WHITE)
+    return Position(state=make_board(state), turn=WHITE)
 
 
 def test_iterative_deepening_stops_on_forced_result(no_time_limit):
     """A proven forced win/loss stops iterative deepening via the mate exit, well
     below the depth cap, instead of spinning the depth counter."""
     depth, value, move = AI(WHITE).iterative_deepening(_forced_result_position())
-    assert abs(value) >= ai_mod.MATE_THRESHOLD, "a forced result is a mate-magnitude value"
+    assert abs(value) >= ai_mod.MATE_THRESHOLD, (
+        "a forced result is a mate-magnitude value"
+    )
     assert depth < ai_mod.MAX_SEARCH_DEPTH, "stopped on the proven result, not the cap"
     assert move is not None
 
@@ -243,17 +261,21 @@ def test_iterative_deepening_respects_depth_cap(no_time_limit, monkeypatch):
 def test_a_real_win_outranks_a_heuristic_line():
     """A terminal win must score above any heuristic position, so a winning move is
     never ranked below a merely material-heavy one."""
-    win: LegacyState = {cell: None for cell in INITIAL_STATE}
+    win: dict[Cell, Piece | None] = {}
     win[(7, 7)] = (WHITE, 1)  # White's only checker -> forced bear-off -> White wins
     win[(0, 6)] = (BLACK, 1)
-    won = Position(state=win, turn=WHITE).new_position_after_move((7, 7), None, "B")
+    won = Position(state=make_board(win), turn=WHITE).new_position_after_move(
+        (7, 7), None, "B"
+    )
     assert won.winner == WHITE
 
-    ahead: LegacyState = {cell: None for cell in INITIAL_STATE}
+    ahead: dict[Cell, Piece | None] = {}
     ahead[(0, 0)] = (WHITE, 1)
     ahead[(2, 0)] = (WHITE, 1)  # White far ahead on material but not finished
     for cell in [(1, 1), (3, 1), (5, 1), (7, 1), (1, 7), (3, 7), (5, 7), (7, 7)]:
         ahead[cell] = (BLACK, 1)
-    heuristic = Position(state=ahead, turn=WHITE)
+    heuristic = Position(state=make_board(ahead), turn=WHITE)
     assert heuristic.winner is None
-    assert won.evaluate() > heuristic.evaluate(), "an actual win must outscore a heuristic lead"
+    assert won.evaluate() > heuristic.evaluate(), (
+        "an actual win must outscore a heuristic lead"
+    )

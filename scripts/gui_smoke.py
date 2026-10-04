@@ -45,7 +45,7 @@ print(
 # Pickle save (already happens in complete_move for human moves) + load (undo).
 game.export_position_data()
 hash_before = game.state_hash
-game.undo_move()  # loads the recovery file via _to_flat + recompute hash
+game.undo_move()  # loads the recovery file and recomputes the hash
 game.board_update()
 print(
     "undo + reload OK; state is list:",

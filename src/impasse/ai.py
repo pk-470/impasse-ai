@@ -1,3 +1,11 @@
+"""
+Alpha-beta search for Impasse.
+
+Fixed-depth alpha-beta with move ordering, iterative deepening under a time
+budget, a transposition table and a leaf-evaluation cache. The search works in
+ints throughout, so a compiled build never boxes a float into a table entry.
+"""
+
 import time
 from collections.abc import Callable
 from typing import Final, cast
@@ -20,9 +28,6 @@ from impasse.position import (
 
 Move = tuple[Cell, Cell | None, MoveTag]
 
-# Only this module's own names. Without it, `from impasse.ai import *` in the
-# package __init__ also re-exports the constants ai.py imports from position.py,
-# rebinding names that are Final there.
 __all__ = [
     "AI",
     "DOUBLE_RAYS",
@@ -43,48 +48,37 @@ __all__ = [
     "milliseconds",
 ]
 
-# The two DIAG_RAYS rows the move ordering wants, keyed by colour alone.
+# The DIAG_RAYS rows for each colour.
 DOUBLE_RAYS: Final[dict[Color, list[list[int]]]] = {
     color: DIAG_RAYS[(color, 2)] for color in (WHITE, BLACK)
 }
 SINGLE_RAYS: Final[dict[Color, list[list[int]]]] = {
     color: DIAG_RAYS[(color, 1)] for color in (WHITE, BLACK)
 }
-# A stored search result; an unsearched position has no entry at all.
+# (value, best move, bound flag, depth searched)
 TTEntry = tuple[int, Move | None, str, int]
 
-# Deliberately not Final, here and for MAX_SEARCH_DEPTH, TT_MAX_ENTRIES and
-# EVAL_CACHE_MAX_ENTRIES: the tests and scripts/bench.py reassign them, and a
-# compiled build folds a Final into its generated code, so the patch would
-# silently do nothing.
+# Not Final: reassigned by the tests and scripts/bench.py.
 MIN_SEARCH_DEPTH = 5
 MILLISECONDS_PER_MOVE: float = 6000
 MAX_MILLISECONDS_PER_MOVE: float = 10000
 
-# Backstop so a cheaply-resolved position cannot spin the depth counter through the
-# whole move budget. Not Final, for the reason above.
+# Backstop so a cheaply-resolved position cannot spin the depth counter.
 MAX_SEARCH_DEPTH = 64
-# A value this large marks a proven forced win/loss, which deeper search cannot
-# change, so iterative deepening stops as soon as it sees one.
+# A value this large is a proven win or loss, so deepening can stop.
 MATE_THRESHOLD: Final = WIN_VALUE // 2
-# Stands in for the infinite initial window, which is the one thing that would
-# otherwise force the search values to be floats. Clear of WIN_VALUE, so a proven
-# win stays strictly inside it.
+# The initial search window, clear of WIN_VALUE.
 INFINITY: Final = WIN_VALUE * 2
 
-# Node interval between on_tick callbacks, so a front end can stay responsive.
 TICK_INTERVAL_NODES: Final = 4096
-# Node interval between time-budget checks: a clock read costs more than most of a
-# node's remaining work, and 512 nodes is a few ms of overshoot on a 6000 ms budget.
 TIME_CHECK_INTERVAL_NODES: Final = 512
 
-# Bounded so they cannot grow without limit across a long game; FIFO eviction.
 TT_MAX_ENTRIES = 2_000_000
 EVAL_CACHE_MAX_ENTRIES = 2_000_000
 
 
 class ABTimeOut(Exception):
-    pass
+    """Raised to abandon a search that has run out of time."""
 
 
 def milliseconds(seconds: float) -> int:
@@ -109,26 +103,21 @@ class AI:
         """
         self.color: Color = color
         self.dev: bool = dev
-        # Keyed by hash * 2 + turn bit: the value depends on the side to move.
+        # Keyed by hash * 2 + turn bit.
         self.transposition_table: dict[int, TTEntry] = {}
-        # Also set in iterative_deepening; defaulted so alpha_beta can be called alone.
         self.search_start_time: int = 0
         self.min_search_depth_reached: bool = False
         self.completed_any_depth: bool = False
-        # evaluate() is a pure, turn-independent function of the board, so it memoizes
-        # by state_hash across the whole game.
+        # evaluate() is turn-independent, so leaves are keyed on the board alone.
         self.eval_cache: dict[int, int] = {}
-        # Killer moves (two per depth slot) and cutoff counts; both order quiet moves.
         self.killers: list[list[Move | None]] = [
             [None, None] for _ in range(MAX_SEARCH_DEPTH + 2)
         ]
         self.history: dict[Move, int] = {}
-        # current_depth is the deepening depth in progress, for the caller to display.
         self.on_tick: Callable[[], None] | None = None
         self.current_depth: int = 0
         self._tick_countdown: int = TICK_INTERVAL_NODES
         self._time_countdown: int = TIME_CHECK_INTERVAL_NODES
-        # Per-move diagnostic counters, populated only when dev is on.
         self.reset_stats()
 
     def reset_stats(self) -> None:
@@ -140,8 +129,6 @@ class AI:
         self.tt_stores = 0
         self.eval_lookups = 0
         self.eval_hits = 0
-
-    # Transposition table retrieval and storage
 
     def tt_retrieve(self, position: Position) -> TTEntry | None:
         """
@@ -193,15 +180,12 @@ class AI:
         table = self.transposition_table
         existing = table.get(key)
         if existing is not None:
-            # Prefer the entry searched to the greater depth; on a tie the newer
-            # result replaces the old one.
+            # Keep the deeper entry; on a tie the newer result wins.
             if existing[3] > depth:
                 return
         elif len(table) >= TT_MAX_ENTRIES:
             del table[next(iter(table))]
         table[key] = (value, move, flag, depth)
-
-    # Finding moves
 
     def ordered_moves(
         self,
@@ -243,20 +227,17 @@ class AI:
         enemy_single = SINGLE_CODE[enemy]
         double_rays = DOUBLE_RAYS[turn]
         single_rays = SINGLE_RAYS[turn]
-        # Most nodes have no TT move; an identity test then saves a compare per move.
         seeded = most_promising_move is not None
         for move in position.moves_list:
             _, target, tag = move
             if seeded and move == most_promising_move:
                 check_first = [move]
-            # "S" and "T" are the bulk of a move list, and a killer slot can only
-            # hold one of those two tags, so no other branch tests against them.
+            # A killer is always tagged "S" or "T".
             elif tag == "S":
                 if move == killer_1 or move == killer_2:
                     killer_moves.append(move)
                 else:
-                    # Ranked by whether the destination blocks an enemy double and
-                    # then a single. Only the nearest piece on each diagonal counts.
+                    # Rank by the enemy pieces the destination blocks, nearest first.
                     assert target is not None
                     base = (target[0] * 8 + target[1]) * 2
                     blocked_doubles = 0
@@ -360,8 +341,7 @@ class AI:
                 full depth has completed.
         """
 
-        # Never time out before one full depth has completed, so iterative_deepening
-        # always has a legal move to return.
+        # Never before one depth has completed.
         self._time_countdown -= 1
         if self._time_countdown <= 0:
             self._time_countdown = TIME_CHECK_INTERVAL_NODES
@@ -381,7 +361,6 @@ class AI:
         if self.dev:
             self.nodes += 1
         old_alpha, old_beta = alpha, beta
-        # A TT entry is only trusted if it was searched at least as deep as this node.
         tt_move: Move | None = None
         entry = self.tt_retrieve(position)
         if entry is not None:
@@ -400,7 +379,6 @@ class AI:
                         self.tt_cutoffs += 1
                     return tt_value, tt_move
 
-        # Regular Alpha-Beta
         if position.winner or not depth:
             state_hash = position.state_hash
             cache = self.eval_cache
@@ -416,7 +394,6 @@ class AI:
                 cache[state_hash] = cached
             return cached, None
 
-        # White maximises, Black minimises, branched once outside the move loop.
         maximising = position.turn == WHITE
         value = -INFINITY if maximising else INFINITY
         best_move: Move | None = None
@@ -437,7 +414,7 @@ class AI:
                 best_move = move
                 beta = min(beta, value)
             if alpha >= beta:
-                # Remember quiet moves that cut off, to try them earlier elsewhere.
+                # Remember quiet cutoffs, to try them earlier elsewhere.
                 if tag == "S" or tag == "T":
                     slot = self.killers[depth]
                     if slot[0] != move:
@@ -504,7 +481,6 @@ class AI:
                 value,
                 best_move,
             )
-            # A proven win/loss cannot change with depth; the ceiling is a hard stop.
             if abs(value) >= MATE_THRESHOLD or search_depth >= MAX_SEARCH_DEPTH:
                 break
             search_depth += 1
@@ -552,8 +528,6 @@ class AI:
             flag that is True when it was the only legal move (returned without
             searching). The first three are None if there is no legal move.
         """
-        # One legal move needs no search. The flat list makes the test exact, where
-        # the nested dict had to check that one origin did not hide several targets.
         moves = position.moves_list
         if len(moves) == 1:
             origin, target, tag = moves[0]

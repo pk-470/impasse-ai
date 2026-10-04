@@ -1,3 +1,12 @@
+"""
+The Impasse board: state, move generation, move application and evaluation.
+
+A board is a flat list of 64 int square codes (see PIECE_TO_CODE) indexed by
+row * 8 + col; only the 32 dark squares are ever occupied. The pathfinders and
+the evaluation pass each exist in a pure-Python and a mypyc-native flavour that
+must stay behaviour-identical; NATIVE chooses between them.
+"""
+
 from __future__ import annotations
 
 import random
@@ -8,10 +17,7 @@ from mypy_extensions import i64, mypyc_attr
 type Cell = tuple[int, int]
 type Color = tuple[int, int, int]
 type Piece = tuple[Color, int]
-# The board is a flat list of 64 int square codes (see PIECE_TO_CODE), indexed by
-# row * 8 + col. A legacy dict[cell, (color, type) | None] is also accepted on input.
 type State = list[int]
-type LegacyState = dict[Cell, Piece | None]
 type MoveTag = Literal["S", "SB", "SC", "T", "TB", "TC", "C", "B"]
 type MoveDestination = Cell | None
 type MoveDict = dict[MoveDestination, MoveTag]
@@ -23,22 +29,6 @@ WHITE: Final[Color] = (255, 255, 255)
 BLACK: Final[Color] = (0, 0, 0)
 OPPOSITE_COLOR: Final[dict[Color, Color]] = {WHITE: BLACK, BLACK: WHITE}
 
-INITIAL_STATE: Final[LegacyState] = {
-    (i, j): (WHITE, 1)
-    if (i, j) in ((0, 0), (3, 1), (4, 0), (7, 1))
-    else (WHITE, 2)
-    if (i, j) in ((1, 7), (2, 6), (5, 7), (6, 6))
-    else (BLACK, 1)
-    if (i, j) in ((0, 6), (3, 7), (4, 6), (7, 7))
-    else (BLACK, 2)
-    if (i, j) in ((1, 1), (2, 0), (5, 1), (6, 0))
-    else None
-    for i in range(8)
-    for j in range(8)
-    if (i + j) % 2 == 0
-}
-
-# Each square holds a compact int code instead of a (color, type) tuple.
 EMPTY: Final = 0
 PIECE_TO_CODE: Final[dict[Piece | None, int]] = {
     None: EMPTY,
@@ -48,7 +38,7 @@ PIECE_TO_CODE: Final[dict[Piece | None, int]] = {
     (BLACK, 2): 4,
 }
 CODE_TO_PIECE: Final[dict[int, Piece | None]] = {c: p for p, c in PIECE_TO_CODE.items()}
-# Checker type per square code: 1 single, 2 crown, index 0 (empty) no type.
+# 1 single, 2 crown; index 0 (empty) has no type.
 CODE_TYPE: Final[bytes] = bytes((0, 1, 2, 1, 2))
 SINGLE_CODE: Final[dict[Color, int]] = {WHITE: 1, BLACK: 3}
 COLOR_CODES: Final[dict[Color, tuple[int, int]]] = {WHITE: (1, 2), BLACK: (3, 4)}
@@ -60,37 +50,25 @@ def _index(cell: Cell) -> int:
 
 
 # The 32 dark squares in board order, and their flat indices.
-DARK_CELLS: Final[list[Cell]] = list(INITIAL_STATE)
+DARK_CELLS: Final[list[Cell]] = [
+    (i, j) for i in range(8) for j in range(8) if (i + j) % 2 == 0
+]
 DARK_INDICES: Final[list[int]] = [_index(cell) for cell in DARK_CELLS]
-# The inverse of _index. Cells are compared by value and never with `is`: they
-# cross pickle boundaries, and compiled these share no objects with DARK_CELLS.
 CELL_AT_INDEX: Final[list[Cell]] = [(idx // 8, idx % 8) for idx in range(64)]
 for _cell in DARK_CELLS:
     CELL_AT_INDEX[_index(_cell)] = _cell
 
-INITIAL_STATE_FLAT: Final[list[int]] = [EMPTY] * 64
-for _cell, _piece in INITIAL_STATE.items():
-    INITIAL_STATE_FLAT[_index(_cell)] = PIECE_TO_CODE[_piece]
-
-
-def _to_flat(state: State | LegacyState) -> State:
-    """
-    Normalise a board to the flat int representation.
-
-    Args:
-        state: Either a flat list of square codes (returned unchanged, so the
-            caller's list becomes owned by the position) or a legacy
-            dict[cell, (color, type) | None] board (converted to a fresh list).
-
-    Returns:
-        A length-64 list of square codes indexed by row * 8 + col.
-    """
-    if isinstance(state, list):
-        return state
-    flat = [EMPTY] * 64
-    for cell, piece in state.items():
-        flat[_index(cell)] = PIECE_TO_CODE[piece]
-    return flat
+# The starting layout, as the cells each square code occupies.
+_INITIAL_LAYOUT: Final[dict[int, tuple[Cell, ...]]] = {
+    1: ((0, 0), (3, 1), (4, 0), (7, 1)),
+    2: ((1, 7), (2, 6), (5, 7), (6, 6)),
+    3: ((0, 6), (3, 7), (4, 6), (7, 7)),
+    4: ((1, 1), (2, 0), (5, 1), (6, 0)),
+}
+INITIAL_STATE: Final[list[int]] = [EMPTY] * 64
+for _code, _cells in _INITIAL_LAYOUT.items():
+    for _cell in _cells:
+        INITIAL_STATE[_index(_cell)] = _code
 
 
 HOME_ROW: Final[dict[Color, tuple[Cell, ...]]] = {
@@ -115,7 +93,7 @@ DIAGONALS: Final[dict[tuple[Cell, Cell], list[Cell]]] = {
         for s in range(1, 8)
         if 0 <= i + s * d[0] < 8 and 0 <= j + s * d[1] < 8
     ]
-    for i, j in INITIAL_STATE
+    for i, j in DARK_CELLS
     for checker in MOVE_DIRECTIONS
     for d in MOVE_DIRECTIONS[checker]
 }
@@ -124,8 +102,7 @@ DIAG_INDICES: Final[dict[tuple[int, Cell], list[int]]] = {
     (_index(cell), d): [_index(c) for c in cells]
     for (cell, d), cells in DIAGONALS.items()
 }
-# The same flat diagonals indexed by [origin index * 2 + direction choice], for
-# move generation and move ordering.
+# The same diagonals indexed by [origin index * 2 + direction choice].
 DIAG_RAYS: Final[dict[Piece, list[list[int]]]] = {
     piece: [
         DIAG_INDICES.get((anchor, MOVE_DIRECTIONS[piece][i]), [])
@@ -134,8 +111,7 @@ DIAG_RAYS: Final[dict[Piece, list[list[int]]]] = {
     ]
     for piece in MOVE_DIRECTIONS
 }
-# As (cell, index) pairs: a move tuple names its destination cell, so slide
-# generation never calls _index.
+# As (cell, index) pairs.
 SLIDE_RAYS: Final[dict[int, list[list[tuple[Cell, int]]]]] = {
     PIECE_TO_CODE[piece]: [
         [
@@ -147,19 +123,15 @@ SLIDE_RAYS: Final[dict[int, list[list[tuple[Cell, int]]]]] = {
     ]
     for piece in MOVE_DIRECTIONS
 }
-# Home rows as 64-byte 0/1 tables, so a membership test is one byte read. Fast in
-# both builds, unlike HOME_MASK.
+# Home rows as 64-byte 0/1 tables.
 HOME_TABLE: Final[dict[Color, bytes]] = {
     color: bytes(1 if idx in indices else 0 for idx in range(64))
     for color, indices in HOME_INDICES.items()
 }
-# Side to move as a bit, for a single-int transposition-table key. Keyed by value,
-# not identity: an unpickled colour is an equal but distinct tuple (gui.py's undo
-# path assigns one), so `turn is WHITE` would be wrong there.
+# Side to move as a bit, for the transposition-table key.
 TURN_BIT: Final[dict[Color, int]] = {WHITE: 0, BLACK: 1}
-# The same flat diagonals indexed by [anchor][direction choice], for the
-# pathfinders. BEAR_DIAGS follows a double's move directions, CROWN_DIAGS a
-# single's; only dark anchors are ever read, and light ones map to an empty list.
+# The same diagonals indexed by [anchor][direction choice]. BEAR_DIAGS follows
+# a double's move directions, CROWN_DIAGS a single's.
 BEAR_DIAGS: Final[dict[Color, list[list[list[int]]]]] = {
     color: [
         [DIAG_INDICES.get((anchor, MOVE_DIRECTIONS[(color, 2)][i]), []) for i in (0, 1)]
@@ -175,19 +147,12 @@ CROWN_DIAGS: Final[dict[Color, list[list[list[int]]]]] = {
     for color in (WHITE, BLACK)
 }
 
-# True when mypyc compiled this module, derived from __file__ so a build and its
-# flag cannot disagree. It picks between the _pure and _native flavours of the
-# pathfinders and the evaluation pass, which must stay behaviour-identical (see
-# test_dual.py). Both sets of tables below are built either way.
+# True when mypyc compiled this module; selects the _pure or _native flavour.
 NATIVE: Final[bool] = not __file__.endswith((".py", ".pyc"))
 
 
 def _signed64(mask: int) -> int:
-    """Reinterpret a 64-bit mask as a signed two's-complement int.
-
-    Index 63 is a home square, so an unsigned mask overflows mypyc's native
-    i64. Bit extraction by arithmetic shift is identical either way.
-    """
+    """Reinterpret a 64-bit mask as signed; bit 63 overflows mypyc's i64."""
     return mask - (1 << 64) if mask >= (1 << 63) else mask
 
 
@@ -201,15 +166,7 @@ RAY_END: Final = 255
 
 
 def _flat_rays(diags: list[list[list[int]]]) -> bytes:
-    """
-    Pack per-anchor diagonals into fixed-stride, sentinel-terminated spans.
-
-    Args:
-        diags: Diagonals indexed [anchor][direction] as flat square indices.
-
-    Returns:
-        A bytes table to be read as table[slot * RAY_STRIDE + step].
-    """
+    """Pack per-anchor diagonals into fixed-stride spans, each ending in RAY_END."""
     data = bytearray([RAY_END] * (128 * RAY_STRIDE))
     for anchor in range(64):
         for i in (0, 1):
@@ -227,8 +184,6 @@ CROWN_RAYS: Final[dict[Color, bytes]] = {
     color: _flat_rays(diags) for color, diags in CROWN_DIAGS.items()
 }
 
-# The same tables split per colour: the fused evaluation loop below walks both
-# colours and so has no Color in hand to key the dicts with.
 BEAR_DIAGS_WHITE: Final = BEAR_DIAGS[WHITE]
 BEAR_DIAGS_BLACK: Final = BEAR_DIAGS[BLACK]
 CROWN_DIAGS_WHITE: Final = CROWN_DIAGS[WHITE]
@@ -241,17 +196,14 @@ CROWN_RAYS_WHITE: Final = CROWN_RAYS[WHITE]
 CROWN_RAYS_BLACK: Final = CROWN_RAYS[BLACK]
 HOME_MASK_WHITE: Final = HOME_MASK[WHITE]
 HOME_MASK_BLACK: Final = HOME_MASK[BLACK]
-# The dark squares as `bytes`, for the native evaluation loop.
 DARK_BYTES: Final = bytes(DARK_INDICES)
 
 # Sentinel "no path found" score, below any score a real path can reach.
 _NO_PATH: Final = -1_000
 
-# Sentinel for the `winner` argument: read the winner off the board rather than
-# taking the caller's word for it. Distinct from None, which means "nobody has won".
+# Sentinel for `winner`: read it off the board. None means "nobody has won".
 DERIVE_WINNER: Final[object] = object()
 
-# Parameters and weights for evaluation
 DOUBLES_PATHS_MAX: Final = 10
 SINGLES_PATHS_MAX: Final = 10
 
@@ -259,15 +211,11 @@ CHECKERS_COUNT_WEIGHT: Final = 120
 DOUBLES_PATHS_WEIGHT: Final = 8
 SINGLES_PATHS_WEIGHT: Final = 2
 DOUBLES_WEIGHT: Final = 1
-# Score of a decided position, far above any reachable heuristic score so a real
-# win always outranks a heuristic line and can be detected as terminal.
+# Score of a decided position, far above any heuristic score.
 WIN_VALUE: Final = 100_000
 
 
-# Zobrist hashing: a random id per (square index, code), as a 2D list the hot path
-# indexes twice rather than a dict keyed by a tuple. 61 bits, not 64, so the hash
-# and the transposition-table key derived from it both stay inside mypyc's
-# tagged-pointer immediate range -- see IMPROVEMENTS.md for the measured cliff.
+# A random id per (square index, code), 61 bits wide.
 ZOBRIST_BITS: Final = 61
 random.seed(42)
 rand_ids: Final[list[list[int]]] = [[0] * 5 for _ in range(64)]
@@ -277,16 +225,7 @@ for _idx in DARK_INDICES:
 
 
 def _moves_to_dict(moves: list[Move]) -> LegalMoves:
-    """
-    Group a flat move list into the nested dict form.
-
-    Args:
-        moves: Moves as (origin, target, tag) triples.
-
-    Returns:
-        A dict mapping each origin cell to its {target: tag} moves, origins in
-        first-seen order.
-    """
+    """Group a flat move list into the {origin: {target: tag}} form."""
     grouped: LegalMoves = {}
     for origin, target, tag in moves:
         entry = grouped.get(origin)
@@ -298,15 +237,7 @@ def _moves_to_dict(moves: list[Move]) -> LegalMoves:
 
 
 def _make_state_hash(state: list[int]) -> int:
-    """
-    Compute the Zobrist hash of a full board from scratch.
-
-    Args:
-        state: A flat list of square codes.
-
-    Returns:
-        The 64-bit Zobrist hash of the occupied configuration.
-    """
+    """Compute a board's Zobrist hash from scratch."""
     state_hash = 0
     for idx in DARK_INDICES:
         state_hash ^= rand_ids[idx][state[idx]]
@@ -325,29 +256,7 @@ def _bear_off_walk_pure(
     prev_empty: bool,
     changed_dir: bool,
 ) -> int:
-    """
-    Walk one double's bear-off paths and return the best score found.
-
-    The pure-Python flavour, used when this module is interpreted: a frozenset
-    home row and the nested-list diagonals are the fastest forms in bytecode.
-    Must stay behaviour-identical to _bear_off_walk_native (see test_dual.py).
-
-    Args:
-        state: The flat board to walk.
-        single: The square code of the moving player's single.
-        home: The moving player's home-row indices.
-        diags: The player's per-anchor double-move diagonals.
-        anchor: The board index the current leg starts from.
-        i: Which of the double's two move directions to follow.
-        best: The best score found for this double so far (_NO_PATH if none).
-        steps: Steps taken so far on the current path.
-        prev_empty: Whether the previous square stepped through was empty.
-        changed_dir: Whether the leg began by changing direction.
-
-    Returns:
-        The better of `best` and the best score reachable from this leg, a score
-        being DOUBLES_PATHS_MAX minus the path's step count.
-    """
+    """Best bear-off score for one double's paths; mirrors the native flavour."""
     for idx in diags[anchor][i]:
         piece = state[idx]
         if piece == EMPTY:
@@ -359,8 +268,7 @@ def _bear_off_walk_pure(
             # Add one step before changing direction
             new_steps = steps + 1
         elif piece == single:
-            # Landing on a single costs a step, unless changing direction at an
-            # empty cell has already paid for it.
+            # Landing on a single costs a step, unless the direction change paid.
             if not (changed_dir and prev_empty):
                 steps += 1
             changed_dir = False
@@ -375,8 +283,7 @@ def _bear_off_walk_pure(
             best = DOUBLES_PATHS_MAX - steps
             break
 
-        # Steps only grow, so a leg that cannot beat `best` is dead; cutting it
-        # changes nothing.
+        # Steps only grow, so a leg that cannot beat `best` is dead.
         if DOUBLES_PATHS_MAX - new_steps > best:
             best = _bear_off_walk_pure(
                 state,
@@ -403,24 +310,7 @@ def _crown_walk_pure(
     best: int,
     steps: int,
 ) -> int:
-    """
-    Walk one single's paths to a crowning square and return the best score found.
-
-    The pure-Python flavour; mirrors _crown_walk_native.
-
-    Args:
-        state: The flat board to walk.
-        home: The opponent home-row indices (the crowning squares).
-        diags: The player's per-anchor single-move diagonals.
-        anchor: The board index the current leg starts from.
-        i: Which of the single's two move directions to follow.
-        best: The best score found for this single so far (_NO_PATH if none).
-        steps: Steps taken so far on the current path.
-
-    Returns:
-        The better of `best` and the best score reachable from this leg, a score
-        being SINGLES_PATHS_MAX minus the path's step count.
-    """
+    """Best crowning score for one single's paths; mirrors the native flavour."""
     for idx in diags[anchor][i]:
         if state[idx] != EMPTY:
             break
@@ -447,32 +337,7 @@ def _bear_off_walk_native(
     prev_empty: bool,
     changed_dir: bool,
 ) -> i64:
-    """
-    Walk one double's bear-off paths and return the best score found.
-
-    The mypyc flavour, used when this module is compiled: native i64 scalars, a
-    bitmask home row and flat `bytes` rays compile to C integer arithmetic with no
-    boxing in the recursion, which is the engine's hottest loop. Interpreted this
-    form is ~25% slower than _bear_off_walk_pure, which is why both exist.
-    Must stay behaviour-identical to it (see test_dual.py).
-
-    Args:
-        board: The flat board to walk, as `bytes`. mypyc compiles a `bytes`
-            index to a native byte read where `list[int]` has to unbox an
-            object, and this is the engine's hottest read.
-        single: The square code of the moving player's single.
-        home: The moving player's home row as a 64-bit occupancy bitmask.
-        rays: The player's flat double-move ray table (see _flat_rays).
-        slot: Which ray to follow, as anchor * 2 + direction.
-        best: The best score found for this double so far (_NO_PATH if none).
-        steps: Steps taken so far on the current path.
-        prev_empty: Whether the previous square stepped through was empty.
-        changed_dir: Whether the leg began by changing direction.
-
-    Returns:
-        The better of `best` and the best score reachable from this leg, a score
-        being DOUBLES_PATHS_MAX minus the path's step count.
-    """
+    """Best bear-off score for one double's paths; the mypyc i64/bytes flavour."""
     k: i64 = slot * RAY_STRIDE
     while True:
         idx: i64 = rays[k]
@@ -490,8 +355,7 @@ def _bear_off_walk_native(
             # Add one step before changing direction
             new_steps = steps + 1
         elif piece == single:
-            # Landing on a single costs a step, unless changing direction at an
-            # empty cell has already paid for it.
+            # Landing on a single costs a step, unless the direction change paid.
             if not (changed_dir and prev_empty):
                 steps += 1
             changed_dir = False
@@ -506,8 +370,7 @@ def _bear_off_walk_native(
             best = DOUBLES_PATHS_MAX - steps
             break
 
-        # Steps only grow, so a leg that cannot beat `best` is dead; cutting it
-        # changes nothing.
+        # Steps only grow, so a leg that cannot beat `best` is dead.
         if DOUBLES_PATHS_MAX - new_steps > best:
             best = _bear_off_walk_native(
                 board,
@@ -532,23 +395,7 @@ def _crown_walk_native(
     best: i64,
     steps: i64,
 ) -> i64:
-    """
-    Walk one single's paths to a crowning square and return the best score found.
-
-    The mypyc flavour; mirrors _crown_walk_pure.
-
-    Args:
-        board: The flat board to walk, as `bytes` (see _bear_off_walk_native).
-        home: The opponent home row (the crowning squares) as a bitmask.
-        rays: The player's flat single-move ray table (see _flat_rays).
-        slot: Which ray to follow, as anchor * 2 + direction.
-        best: The best score found for this single so far (_NO_PATH if none).
-        steps: Steps taken so far on the current path.
-
-    Returns:
-        The better of `best` and the best score reachable from this leg, a score
-        being SINGLES_PATHS_MAX minus the path's step count.
-    """
+    """Best crowning score for one single's paths; the mypyc i64/bytes flavour."""
     k: i64 = slot * RAY_STRIDE
     while True:
         idx: i64 = rays[k]
@@ -573,22 +420,8 @@ def _crown_walk_native(
 
 def _eval_paths_pure(state: list[int]) -> tuple[int, int, int]:
     """
-    Score both players' bear-off and crowning prospects in one board pass.
-
-    The pure-Python flavour, used when this module is interpreted.
-    Must stay behaviour-identical to _eval_paths_native (see test_dual.py).
-
-    One pass walks every piece of both colours as it is found, rather than
-    bucketing the four piece kinds into lists and then making four driving
-    calls over them: each piece's score is independent of the others, so the
-    only thing the lists bought was the order the sums accumulate in.
-
-    Args:
-        state: The flat board to score.
-
-    Returns:
-        (doubles_path_score, singles_path_score, doubles_count), each as
-        White's total minus Black's.
+    Score both players' prospects in one pass, as White's total minus Black's:
+    (doubles_path_score, singles_path_score, doubles_count).
     """
     white_double_paths = 0
     black_double_paths = 0
@@ -598,8 +431,7 @@ def _eval_paths_pure(state: list[int]) -> tuple[int, int, int]:
     black_doubles = 0
     for idx in DARK_INDICES:
         code = state[idx]
-        # A single walks towards the far home row (code 1 is White's single, 3
-        # is Black's); a double walks towards its owner's own home row.
+        # A single walks towards the far home row, a double towards its own.
         if code == 1:
             best = _crown_walk_pure(
                 state, HOME_INDICES_BLACK, CROWN_DIAGS_WHITE, idx, 0, _NO_PATH, 1
@@ -682,20 +514,7 @@ def _eval_paths_pure(state: list[int]) -> tuple[int, int, int]:
 
 
 def _eval_paths_native(board: bytes) -> tuple[int, int, int]:
-    """
-    Score both players' bear-off and crowning prospects in one board pass.
-
-    The mypyc flavour; mirrors _eval_paths_pure. Takes the board as `bytes` so
-    that every square read, here and in the walkers this drives, is a native
-    byte read (see _bear_off_walk_native).
-
-    Args:
-        board: The flat board to score, as `bytes`.
-
-    Returns:
-        (doubles_path_score, singles_path_score, doubles_count), each as
-        White's total minus Black's.
-    """
+    """The mypyc flavour of _eval_paths_pure, reading the board as `bytes`."""
     white_double_paths: i64 = 0
     black_double_paths: i64 = 0
     white_single_paths: i64 = 0
@@ -791,24 +610,20 @@ class Position:
     and to calculate the effect of a move on a position.
     """
 
-    # Declared here because there are two constructor paths (make_position and the
-    # clone fast path), and mypyc lays out the native instance struct from these.
     state: State
     turn: Color
-    # Two plain fields rather than a dict keyed by colour, which cost an allocation
-    # on every node's clone. The dict form stays available as checkers_total below.
+    # The dict form is the checkers_total property below.
     checkers_white: int
     checkers_black: int
     winner: Color | None
     state_hash: int
-    # Generated lazily (None means "not yet computed"): most nodes are eval-only
-    # leaves. _moves_list is primary, _all_legal_moves is derived from it.
+    # Generated lazily; None means "not yet computed".
     _moves_list: list[Move] | None
     _all_legal_moves: LegalMoves | None
 
     def __init__(
         self,
-        state: State | LegacyState | None = None,
+        state: State | None = None,
         turn: Color | None = None,
         checkers_total: dict[Color, int] | None = None,
         all_legal_moves: LegalMoves | None = None,
@@ -816,8 +631,8 @@ class Position:
         state_hash: int | None = None,
         clone_of: Position | None = None,
     ):
-        # Fast path for copy(): every field is known, so skip make_position's ladder
-        # of "derive this if it was not given" conditionals.
+        # Fast path for copy(): every field is known.
+        """Create a position, or clone `clone_of` when it is given."""
         if clone_of is not None:
             self.state = clone_of.state.copy()
             self.turn = clone_of.turn
@@ -834,7 +649,7 @@ class Position:
 
     def make_position(
         self,
-        state: State | LegacyState | None = None,
+        state: State | None = None,
         turn: Color | None = None,
         checkers_total: dict[Color, int] | None = None,
         all_legal_moves: LegalMoves | None = None,
@@ -845,7 +660,8 @@ class Position:
         Set up the position from the given data, deriving whatever is omitted.
 
         Args:
-            state: The board, flat or legacy-dict; a fresh starting board if None.
+            state: The board as 64 square codes, which the position takes
+                ownership of; a fresh starting board if None.
             turn: The side to move; White if None.
             checkers_total: Each side's checker count; counted from the board if
                 None.
@@ -856,7 +672,7 @@ class Position:
                 read off the board instead: a side with no checkers left has won.
             state_hash: The board's Zobrist hash; computed from the board if None.
         """
-        self.state = INITIAL_STATE_FLAT.copy() if state is None else _to_flat(state)
+        self.state = INITIAL_STATE.copy() if state is None else state
         self.turn = WHITE if turn is None else turn
         self._moves_list = None
         self._all_legal_moves = all_legal_moves
@@ -898,7 +714,7 @@ class Position:
     def all_legal_moves(self, value: LegalMoves | None) -> None:
         """Set the position's legal moves, or None to drop them."""
         self._all_legal_moves = value
-        # Drop the flat form too; it is re-derived from the board on next access.
+        # Drop the flat form too; it is re-derived on next access.
         self._moves_list = None
 
     @property
@@ -941,10 +757,8 @@ class Position:
             A new Position equal to this one in board, turn, checker counts,
             winner, legal moves and hash, sharing no mutable state with it.
         """
-        # Legal moves are left unset: most clones are leaves that never need them.
+        # Legal moves are left unset; the next access re-derives them.
         return Position(clone_of=self)
-
-    # Some shortcuts for various checks
 
     def is_occupied(self, cell: Cell) -> bool:
         """Return whether `cell` is on the board and holds a checker."""
@@ -982,8 +796,6 @@ class Position:
         """
         return CODE_TO_PIECE[self.state[_index(cell)]]
 
-    # Impasse game functions
-
     def _append_slides(
         self,
         origin: Cell,
@@ -994,24 +806,8 @@ class Position:
         out: list[Move],
     ) -> None:
         """
-        Append every slide available to the checker on a cell.
-
-        Appends rather than returning a dict: generation runs on every internal
-        search node and the per-origin dicts were allocated only to be flattened.
-        Everything that depends on the position rather than on the origin is
-        passed in: the caller has read the square already, and the two home-row
-        tables are the same for every origin it visits.
-
-        Args:
-            origin: The cell of the moving checker.
-            origin_index: That cell's flat board index.
-            origin_code: The square code there, which must be a checker of the
-                player to move.
-            turn_home: The mover's home-row table (HOME_TABLE).
-            far_home: The opponent's home-row table.
-            out: The move list to append to. Tags are "S" for a regular slide,
-                "SB" for a slide onto the player's home row (a bear off), or "SC"
-                for a slide of a single onto the far row (enabling a crowning).
+        Append the checker's slides to `out`, tagged "SB" (bear off), "SC"
+        (enables a crowning) or "S".
         """
         state = self.state
         rays = SLIDE_RAYS[origin_code]
@@ -1042,25 +838,8 @@ class Position:
         out: list[Move],
     ) -> None:
         """
-        Append every transpose available to the crown on a cell.
-
-        A transpose swaps with a single on the *adjacent* square in one of the
-        crown's two move directions, which is the first entry of that
-        direction's slide ray -- empty exactly when the square is off the board.
-        So this reads SLIDE_RAYS too, instead of stepping a direction vector and
-        bounds-checking the result.
-
-        Args:
-            origin: The cell of the moving crown.
-            origin_index: That cell's flat board index.
-            origin_code: The square code there, which must be a crown of the
-                player to move.
-            single: The mover's single square code.
-            turn_home: The mover's home-row table (HOME_TABLE).
-            far_home: The opponent's home-row table.
-            out: The move list to append to. Tags are "T" for a regular transpose,
-                "TB" for one onto the player's home row (a bear off), or "TC" for
-                one leaving a single on the far row (enabling a crowning).
+        Append the crown's transposes to `out`, tagged "TB" (bear off), "TC"
+        (enables a crowning) or "T".
         """
         state = self.state
         rays = SLIDE_RAYS[origin_code]
@@ -1111,8 +890,7 @@ class Position:
         single = SINGLE_CODE[self.turn]
         state = self.state
         far_row = HOME_ROW[OPPOSITE_COLOR[self.turn]]
-        # Cheap rejection first: no mover's single on the far row means none is owed.
-        # This runs after most move applications, so four reads instead of thirty-two.
+        # No mover's single on the far row means no crowning is owed.
         owed = False
         for target in far_row:
             if state[target[0] * 8 + target[1]] == single:
@@ -1122,7 +900,7 @@ class Position:
             return []
 
         out: list[Move] = []
-        # One helper can crown several far-row singles, so an origin keeps every one.
+        # One helper can crown several far-row singles.
         for cell in DARK_CELLS:
             if state[cell[0] * 8 + cell[1]] != single:
                 continue
@@ -1160,17 +938,14 @@ class Position:
         state = self.state
         turn_home = HOME_TABLE[turn]
         far_home = HOME_TABLE[OPPOSITE_COLOR[turn]]
-        # Scanned by index, with the cell read off CELL_AT_INDEX only for the mover's
-        # own squares; the two tests that find those are all 32 squares pay for.
         for idx in DARK_INDICES:
             code = state[idx]
             if code == single:
-                # Singles slide.
                 self._append_slides(
                     CELL_AT_INDEX[idx], idx, code, turn_home, far_home, out
                 )
             elif code == double:
-                # Crowns transpose as well as slide, transposes first.
+                # Crowns transpose as well as slide; transposes come first.
                 cell = CELL_AT_INDEX[idx]
                 self._append_transposes(
                     cell, idx, code, single, turn_home, far_home, out
@@ -1235,20 +1010,8 @@ class Position:
         self, origin: Cell, target: MoveDestination, tag: MoveTag
     ) -> tuple[int, int, int, int]:
         """
-        Compute the squares a move changes, as flat indices and codes.
-
-        The same decision table as apply_move, which builds its dict from this, but
-        without allocating one: the search applies millions of moves and only ever
-        needs the indices. A bear off changes one square, every other move two.
-
-        Args:
-            origin: The moving checker's cell.
-            target: The destination cell, or None for a bear off.
-            tag: The move tag.
-
-        Returns:
-            (origin_index, origin_code, target_index, target_code), where
-            target_index is -1 when the move changes only the origin square.
+        The squares a move changes, as (origin_index, origin_code, target_index,
+        target_code); target_index is -1 when only the origin square changes.
         """
         turn = self.turn
         single = SINGLE_CODE[turn]
@@ -1325,12 +1088,7 @@ class Position:
         self.state[idx] = new_code
 
     def _bear_off_one(self) -> int:
-        """
-        Take one checker of the player to move off the board.
-
-        Returns:
-            How many checkers that player has left.
-        """
+        """Take one of the mover's checkers off the board; return how many remain."""
         if self.turn == WHITE:
             self.checkers_white -= 1
             return self.checkers_white
@@ -1338,41 +1096,26 @@ class Position:
         return self.checkers_black
 
     def _advance(self, tag: MoveTag) -> None:
-        """
-        Advance turn, winner and pending crownings after a move's squares are set.
-
-        Split out of update() so the search can write squares from the packed form
-        of a move and still share this one copy of the turn-flow rules.
-
-        Args:
-            tag: The tag of the move just applied.
-        """
+        """Advance turn, winner and pending crownings once a move's squares are set."""
         # Bear off
         if tag == "B":
             remaining = self._bear_off_one()
-            # Check for win
             if not remaining:
                 self.winner = self.turn
                 # A decided position has no moves to offer.
                 self._moves_list = []
                 self._all_legal_moves = None
-            # Might make crowning possible
             else:
                 self.check_for_crownings_and_change_turn()
-        # Slide + Bear off
-        elif tag == "SB":
-            self._bear_off_one()
-            # Might make crowning possible
-            self.check_for_crownings_and_change_turn()
-        # Transpose + Bear off. The new single left on the origin is the rules'
-        # "come to have another on-board single" crowning trigger.
-        elif tag == "TB":
+        # Slide or transpose onto the home row. A "TB" leaves a new single on the
+        # origin, which can itself owe a crowning.
+        elif tag in ("SB", "TB"):
             self._bear_off_one()
             self.check_for_crownings_and_change_turn()
-        # Potential crowning
-        elif tag in ("SC", "TC") or tag == "C":
+        # Crowning, or a move that enables one
+        elif tag in ("SC", "TC", "C"):
             self.check_for_crownings_and_change_turn()
-        # Change turn after a regular slide or regular transpose
+        # Regular slide or transpose
         elif tag in ("S", "T"):
             self.change_turn()
 
@@ -1414,8 +1157,6 @@ class Position:
         """
         if self.winner is not None:
             return WIN_VALUE if self.winner == WHITE else -WIN_VALUE
-        # One pass scores every piece of both colours. The native flavour pays for a
-        # `bytes` snapshot once, then every square read it drives is a native read.
         if NATIVE:
             doubles_path_score, singles_path_score, doubles_count = _eval_paths_native(
                 bytes(self.state)
