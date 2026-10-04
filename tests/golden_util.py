@@ -13,26 +13,29 @@ from math import inf
 
 import impasse.ai as ai_mod
 from impasse.ai import AI, INFINITY
-from impasse.position import BLACK, WHITE, Position
+from impasse.position import BLACK, WHITE, Cell, Color, Move, Position
+
+type SearchResult = tuple[int, int | None, Move | None]
+type ValueCheck = tuple[int, int | None, bool, bool]
 
 
-def _canon_color(color):
+def _canon_color(color: Color | None) -> int:
     return 0 if color == WHITE else 1 if color == BLACK else -1
 
 
-def _move_key(move):
+def _move_key(move: Move) -> tuple[int, int, Cell, str]:
     origin, target, tag = move
     return (origin[0], origin[1], (-1, -1) if target is None else target, tag)
 
 
-def _legal_moves(pos):
+def _legal_moves(pos: Position) -> list[Move]:
     return sorted(
         ((o, t, tag) for o, ts in pos.all_legal_moves.items() for t, tag in ts.items()),
         key=_move_key,
     )
 
 
-def position_features(pos):
+def position_features(pos: Position) -> tuple:
     """A representation-independent tuple of everything observable about a position."""
     return (
         _canon_color(pos.turn),
@@ -44,7 +47,9 @@ def position_features(pos):
     )
 
 
-def trajectory_digest(seed=12345, max_positions=4000, max_games=300):
+def trajectory_digest(
+    seed: int = 12345, max_positions: int = 4000, max_games: int = 300
+) -> tuple[str, int]:
     """
     Digest of the observable trajectory of seeded random self-play games.
 
@@ -69,7 +74,9 @@ def trajectory_digest(seed=12345, max_positions=4000, max_games=300):
     return h.hexdigest(), count
 
 
-def ordering_digest(seed=4242, max_positions=1200, max_games=200):
+def ordering_digest(
+    seed: int = 4242, max_positions: int = 1200, max_games: int = 200
+) -> tuple[str, int]:
     """
     Digest of move *ordering*, which trajectory_digest cannot see.
 
@@ -116,7 +123,7 @@ def ordering_digest(seed=4242, max_positions=1200, max_games=200):
     return h.hexdigest(), count
 
 
-def _replay_to(seed, n_moves):
+def _replay_to(seed: int, n_moves: int) -> Position:
     rng = random.Random(seed)
     pos = Position()
     for _ in range(n_moves):
@@ -128,7 +135,11 @@ def _replay_to(seed, n_moves):
     return pos
 
 
-def search_results(seed=999, offsets=(0, 6, 12, 20, 30), depth=4):
+def search_results(
+    seed: int = 999,
+    offsets: tuple[int, ...] = (0, 6, 12, 20, 30),
+    depth: int = 4,
+) -> tuple[SearchResult, ...]:
     """
     Fixed-depth alpha_beta (value, move) from several seeded midgame positions.
 
@@ -154,7 +165,7 @@ def search_results(seed=999, offsets=(0, 6, 12, 20, 30), depth=4):
         ai_mod.MILLISECONDS_PER_MOVE, ai_mod.MAX_MILLISECONDS_PER_MOVE = saved
 
 
-def _is_legal(pos, move):
+def _is_legal(pos: Position, move: Move) -> bool:
     origin, target, tag = move
     return (
         origin in pos.all_legal_moves
@@ -163,7 +174,11 @@ def _is_legal(pos, move):
     )
 
 
-def search_values_legal_tied(seed=999, offsets=(0, 6, 12, 20, 30), depth=4):
+def search_values_legal_tied(
+    seed: int = 999,
+    offsets: tuple[int, ...] = (0, 6, 12, 20, 30),
+    depth: int = 4,
+) -> tuple[ValueCheck, ...]:
     """
     Per-offset (off, value, move_is_legal, move_attains_value) for the value-only
     golden.

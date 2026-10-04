@@ -1,11 +1,8 @@
 """
 Game-logic regression tests for impasse.position.
 
-Split into two groups:
-  * invariants  - encode behaviour that is already correct and must never change
-                  (these also guard the later performance refactors);
-  * bug fixes   - encode the *correct* behaviour for the crowning/turn defects;
-                  red on the unfixed engine, green once the fixes land.
+One class per method under test. Several encode the correct behaviour for
+crowning and turn-flow defects, and were red on the unfixed engine.
 """
 
 import random
@@ -36,185 +33,181 @@ def perft(pos: Position, depth: int) -> int:
     return total
 
 
-def _empty_board() -> dict[Cell, Piece | None]:
-    """An empty {cell: piece} mapping, to be filled and passed to make_board."""
-    return {}
+class TestMoveGeneration:
+    def test_start_move_counts(self) -> None:
+        p = Position()
+        assert len(p.all_legal_moves) == 4
+        assert sum(len(t) for t in p.all_legal_moves.values()) == 22
+
+    @pytest.mark.parametrize("depth,expected", [(1, 22), (2, 492), (3, 9692)])
+    def test_perft_from_the_start(self, depth: int, expected: int) -> None:
+        assert perft(Position(), depth) == expected
 
 
-# --------------------------------------------------------------------------- #
-# Invariants (green on the current engine; guard the perf refactors)
-# --------------------------------------------------------------------------- #
+class TestEvaluate:
+    def test_the_start_position_is_symmetric(self) -> None:
+        assert Position().evaluate() == 0
+
+    def test_is_turn_independent(self) -> None:
+        pw = Position(state=INITIAL_STATE.copy(), turn=WHITE)
+        pb = Position(state=INITIAL_STATE.copy(), turn=BLACK)
+        assert pw.evaluate() == pb.evaluate()
 
 
-def test_start_move_counts():
-    p = Position()
-    assert len(p.all_legal_moves) == 4
-    assert sum(len(t) for t in p.all_legal_moves.values()) == 22
+class TestPieceAt:
+    @pytest.mark.parametrize(
+        "cell,piece",
+        [
+            ((0, 0), (WHITE, 1)),
+            ((1, 7), (WHITE, 2)),
+            ((0, 6), (BLACK, 1)),
+            ((1, 1), (BLACK, 2)),
+            ((3, 3), None),
+        ],
+    )
+    def test_decodes_each_square_to_a_colour_and_type(
+        self, cell: Cell, piece: Piece | None
+    ) -> None:
+        assert Position().piece_at(cell) == piece
 
 
-@pytest.mark.parametrize("depth,expected", [(1, 22), (2, 492), (3, 9692)])
-def test_perft_start(depth, expected):
-    assert perft(Position(), depth) == expected
+class TestStateHash:
+    def test_incremental_matches_from_scratch(self) -> None:
+        random.seed(7)
+        pos = Position()
+        for _ in range(60):
+            if pos.winner is not None:
+                break
+            origin = random.choice(list(pos.all_legal_moves))
+            target = random.choice(list(pos.all_legal_moves[origin]))
+            pos = pos.new_position_after_move(
+                origin, target, pos.all_legal_moves[origin][target]
+            )
+            assert pos.state_hash == _make_state_hash(pos.state)
 
 
-def test_start_eval_is_symmetric():
-    assert Position().evaluate() == 0
+class TestNewPositionAfterMove:
+    def test_does_not_mutate_the_source(self) -> None:
+        p = Position()
+        before_state, before_hash = p.state.copy(), p.state_hash
+        origin = next(iter(p.all_legal_moves))
+        target = next(iter(p.all_legal_moves[origin]))
+        p.new_position_after_move(origin, target, p.all_legal_moves[origin][target])
+        assert p.state == before_state
+        assert p.state_hash == before_hash
 
 
-def test_evaluate_is_turn_independent():
-    # evaluate() is a pure function of the board; the same board must score the
-    # same regardless of side to move (this guards the eval-memoization refactor).
-    pw = Position(state=INITIAL_STATE.copy(), turn=WHITE)
-    pb = Position(state=INITIAL_STATE.copy(), turn=BLACK)
-    assert pw.evaluate() == pb.evaluate()
-
-
-def test_incremental_zobrist_matches_from_scratch():
-    random.seed(7)
-    pos = Position()
-    for _ in range(60):
-        if pos.winner is not None:
-            break
-        origin = random.choice(list(pos.all_legal_moves))
-        target = random.choice(list(pos.all_legal_moves[origin]))
-        pos = pos.new_position_after_move(
-            origin, target, pos.all_legal_moves[origin][target]
+class TestWinner:
+    def test_is_set_on_the_last_bear_off(self) -> None:
+        pos = Position(
+            state=make_board(
+                {
+                    (7, 7): (WHITE, 1),  # cornered single -> forced bear-off
+                    (0, 6): (BLACK, 1),
+                }
+            ),
+            turn=WHITE,
         )
-        assert pos.state_hash == _make_state_hash(pos.state)
+        assert pos.all_legal_moves == {(7, 7): {None: "B"}}
+        nxt = pos.new_position_after_move((7, 7), None, "B")
+        assert nxt.checkers_total[WHITE] == 0
+        assert nxt.winner == WHITE
+
+    def test_is_read_off_an_explicitly_given_board(self) -> None:
+        board = make_board({(0, 6): (BLACK, 1), (7, 7): (BLACK, 2)})
+        assert Position(state=board.copy(), turn=BLACK).winner == WHITE
+        assert Position(state=board.copy(), turn=BLACK).evaluate() == WIN_VALUE
+        # None still means "nobody has won".
+        assert Position(state=board, turn=BLACK, winner=None).winner is None
 
 
-def test_new_position_does_not_mutate_source():
-    p = Position()
-    before_state, before_hash = p.state.copy(), p.state_hash
-    origin = next(iter(p.all_legal_moves))
-    target = next(iter(p.all_legal_moves[origin]))
-    p.new_position_after_move(origin, target, p.all_legal_moves[origin][target])
-    assert p.state == before_state
-    assert p.state_hash == before_hash
-
-
-def test_piece_at_decodes_pieces():
-    # piece_at is the accessor the GUI renders from; it must report each piece as a
-    # (color, type) pair and None for empty cells, whatever the internal encoding.
-    p = Position()
-    assert p.piece_at((0, 0)) == (WHITE, 1)
-    assert p.piece_at((1, 7)) == (WHITE, 2)
-    assert p.piece_at((0, 6)) == (BLACK, 1)
-    assert p.piece_at((1, 1)) == (BLACK, 2)
-    assert p.piece_at((3, 3)) is None
-
-
-def test_winner_on_last_bear_off():
-    state = _empty_board()
-    state[(7, 7)] = (WHITE, 1)  # cornered single -> impasse -> forced bear-off
-    state[(0, 6)] = (BLACK, 1)  # black still on the board
-    pos = Position(state=make_board(state), turn=WHITE)
-    assert pos.all_legal_moves == {(7, 7): {None: "B"}}
-    nxt = pos.new_position_after_move((7, 7), None, "B")
-    assert nxt.checkers_total[WHITE] == 0
-    assert nxt.winner == WHITE
-
-
-# --------------------------------------------------------------------------- #
-# Bug fixes (red on the unfixed engine)
-# --------------------------------------------------------------------------- #
-
-
-def test_chained_crowning_keeps_turn():
-    """
-    Bug #3 (update 'C'): crowning one of several mandatory crownings must keep
-    the turn with the mover and offer the remaining crownings."""
-    state = _empty_board()
-    state.update(
-        {
-            (1, 7): (WHITE, 1),  # on BLACK home row -> must be crowned
-            (3, 7): (WHITE, 1),
-            (5, 7): (WHITE, 1),
-            (0, 0): (WHITE, 1),  # helper single
-            (7, 7): (BLACK, 1),
+class TestCrownings:
+    def test_a_chained_crowning_keeps_the_turn(self) -> None:
+        pos = Position(
+            state=make_board(
+                {
+                    (1, 7): (WHITE, 1),  # on BLACK's home row -> must be crowned
+                    (3, 7): (WHITE, 1),
+                    (5, 7): (WHITE, 1),
+                    (0, 0): (WHITE, 1),  # helper single
+                    (7, 7): (BLACK, 1),
+                }
+            ),
+            turn=WHITE,
+        )
+        tags = {
+            tag for targets in pos.all_legal_moves.values() for tag in targets.values()
         }
-    )
-    pos = Position(state=make_board(state), turn=WHITE)
-    tags = {tag for targets in pos.all_legal_moves.values() for tag in targets.values()}
-    assert tags == {"C"}, "all moves should be forced crownings"
+        assert tags == {"C"}, "all moves should be forced crownings"
 
-    nxt = pos.new_position_after_move((0, 0), (5, 7), "C")
-    assert nxt.turn == WHITE, (
-        "turn must stay with the mover while a crowning is still owed"
-    )
-    nxt_tags = {
-        tag for targets in nxt.all_legal_moves.values() for tag in targets.values()
-    }
-    assert nxt_tags == {"C"}, "the remaining mandatory crownings must be offered"
-
-
-def test_incoming_mandatory_crowning_is_offered():
-    """
-    Bug #4 (change_turn): when the turn passes to a side that owes a mandatory
-    crowning, change_turn must offer it (get_all_legal_moves, not get_other_moves)."""
-    state = _empty_board()
-    state.update(
-        {
-            (3, 7): (WHITE, 1),  # white single parked on BLACK's home row
-            (0, 0): (WHITE, 1),  # helper single -> crowning is mandatory for white
-            (5, 5): (BLACK, 1),
+        nxt = pos.new_position_after_move((0, 0), (5, 7), "C")
+        assert nxt.turn == WHITE, (
+            "turn must stay with the mover while a crowning is still owed"
+        )
+        nxt_tags = {
+            tag for targets in nxt.all_legal_moves.values() for tag in targets.values()
         }
-    )
-    pos = Position(state=make_board(state), turn=BLACK)
-    assert pos.all_legal_moves[(5, 5)][(6, 4)] == "S"
-    nxt = pos.new_position_after_move((5, 5), (6, 4), "S")
-    assert nxt.turn == WHITE
-    tags = {tag for targets in nxt.all_legal_moves.values() for tag in targets.values()}
-    assert "C" in tags, "the incoming mandatory crowning must be in the legal moves"
+        assert nxt_tags == {"C"}, "the remaining mandatory crownings must be offered"
 
+    def test_an_incoming_mandatory_crowning_is_offered(self) -> None:
+        pos = Position(
+            state=make_board(
+                {
+                    (3, 7): (WHITE, 1),  # white single parked on BLACK's home row
+                    (0, 0): (WHITE, 1),  # helper -> the crowning is mandatory
+                    (5, 5): (BLACK, 1),
+                }
+            ),
+            turn=BLACK,
+        )
+        assert pos.all_legal_moves[(5, 5)][(6, 4)] == "S"
+        nxt = pos.new_position_after_move((5, 5), (6, 4), "S")
+        assert nxt.turn == WHITE
+        tags = {
+            tag for targets in nxt.all_legal_moves.values() for tag in targets.values()
+        }
+        assert "C" in tags, "the incoming mandatory crowning must be in the legal moves"
 
-def test_crownings_offer_every_legal_helper_target_pair():
-    """
-    Every (helper, furthest-row single) pair is offered, not just the last one.
+    def test_every_legal_helper_target_pair_is_offered(self) -> None:
+        pos = Position(
+            state=make_board(
+                {
+                    (1, 7): (WHITE, 1),
+                    (3, 7): (WHITE, 1),
+                    (0, 0): (WHITE, 1),
+                    (6, 0): (BLACK, 2),
+                }
+            ),
+            turn=WHITE,
+        )
+        offered = {
+            (origin, target)
+            for origin, targets in pos.all_legal_moves.items()
+            for target, tag in targets.items()
+            if tag == "C"
+        }
+        assert offered == {
+            ((0, 0), (1, 7)),
+            ((0, 0), (3, 7)),
+            ((1, 7), (3, 7)),
+            ((3, 7), (1, 7)),
+        }
 
-    Keying the crownings map by helper origin alone used to drop A1 -> B8 here.
-    """
-    board = _empty_board()
-    board[(1, 7)] = (WHITE, 1)
-    board[(3, 7)] = (WHITE, 1)
-    board[(0, 0)] = (WHITE, 1)
-    board[(6, 0)] = (BLACK, 2)
-    pos = Position(state=make_board(board), turn=WHITE)
-    offered = {
-        (origin, target)
-        for origin, targets in pos.all_legal_moves.items()
-        for target, tag in targets.items()
-        if tag == "C"
-    }
-    assert offered == {
-        ((0, 0), (1, 7)),
-        ((0, 0), (3, 7)),
-        ((1, 7), (3, 7)),
-        ((3, 7), (1, 7)),
-    }
-
-
-def test_transpose_bear_off_checks_for_crownings():
-    """'TB' creates a new single, which can owe a crowning, so the turn must stay."""
-    board = _empty_board()
-    board[(1, 7)] = (WHITE, 1)  # uncrowned single on White's furthest row
-    board[(2, 0)] = (WHITE, 1)  # single in White's nearest row
-    board[(1, 1)] = (WHITE, 2)  # double that can transpose onto it
-    board[(6, 0)] = (BLACK, 2)
-    pos = Position(state=make_board(board), turn=WHITE)
-    update = pos.apply_move((1, 1), (2, 0), "TB")
-    pos.update(update, "TB")
-    assert pos.turn == WHITE, "a crowning is owed, so the turn must not change"
-    assert all(tag == "C" for t in pos.all_legal_moves.values() for tag in t.values())
-
-
-def test_winner_is_read_off_an_explicitly_given_board():
-    """A board with no White checkers is a White win, without being told so."""
-    board = _empty_board()
-    board[(0, 6)] = (BLACK, 1)
-    board[(7, 7)] = (BLACK, 2)
-    pos = Position(state=make_board(board), turn=BLACK)
-    assert pos.winner == WHITE
-    assert pos.evaluate() == WIN_VALUE
-    # None still means "nobody has won", so copies of a live game are unaffected.
-    assert Position(state=make_board(board), turn=BLACK, winner=None).winner is None
+    def test_a_transpose_bear_off_keeps_the_turn(self) -> None:
+        """A "TB" leaves a new single on the origin, which can itself owe a crowning."""
+        pos = Position(
+            state=make_board(
+                {
+                    (1, 7): (WHITE, 1),  # uncrowned single on White's furthest row
+                    (2, 0): (WHITE, 1),  # single in White's nearest row
+                    (1, 1): (WHITE, 2),  # double that can transpose onto it
+                    (6, 0): (BLACK, 2),
+                }
+            ),
+            turn=WHITE,
+        )
+        pos.update(pos.apply_move((1, 1), (2, 0), "TB"), "TB")
+        assert pos.turn == WHITE, "a crowning is owed, so the turn must not change"
+        assert all(
+            tag == "C" for t in pos.all_legal_moves.values() for tag in t.values()
+        )

@@ -8,11 +8,12 @@ flat int-board rewrite keeps the board picklable and faithfully reconstructable.
 
 import pickle
 import random
+from typing import Any
 
 from impasse.position import Position, _make_state_hash
 
 
-def _midgame(seed=3, plies=25):
+def _midgame(seed: int = 3, plies: int = 25) -> Position:
     """Return a position reached by `plies` seeded random moves."""
     rng = random.Random(seed)
     pos = Position()
@@ -25,7 +26,7 @@ def _midgame(seed=3, plies=25):
     return pos
 
 
-def _save_dict(pos):
+def _save_dict(pos: Position) -> dict[str, Any]:
     """Mirror the engine-relevant fields the GUI pickles for recovery."""
     return {
         "state": pos.state,
@@ -36,8 +37,7 @@ def _save_dict(pos):
     }
 
 
-def test_state_survives_pickle_roundtrip():
-    """A pickled board reconstructs to an identical, consistent position."""
+def test_state_survives_pickle_roundtrip() -> None:
     pos = _midgame()
     data = pickle.loads(pickle.dumps(_save_dict(pos)))
     restored = Position(
